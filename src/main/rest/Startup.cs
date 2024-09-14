@@ -50,6 +50,18 @@ namespace iLib.src.main.rest
                 return NHibernateHelper.OpenSession();
             });
 
+            // Configure CORS
+            services.AddCors(options =>
+            {
+                options.AddPolicy("CorsPolicy", builder =>
+                {
+                        builder.SetIsOriginAllowed(_ => true) // Allows any origin
+                           .AllowAnyMethod()
+                           .AllowAnyHeader()
+                           .AllowCredentials();
+                });
+            });
+
             // Other service registrations
             services.AddEndpointsApiExplorer();
             services.AddSwaggerGen();
@@ -66,8 +78,8 @@ namespace iLib.src.main.rest
 
             app.UseHttpsRedirection();
             app.UsePathBase("/ilib/v1");
+            app.UseCors("CorsPolicy");
             app.UseRouting();
-            app.UseMiddleware<ResponseHeadersMiddleware>();
             app.UseMiddleware<JwtMiddleware>();
             app.UseAuthentication();
             app.UseAuthorization();

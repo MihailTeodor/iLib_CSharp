@@ -20,9 +20,23 @@ public class AuthenticationEndpointTests
         await QueryUtils.TruncateAllTables(_session);
         await QueryUtils.CreateUser(_session, Guid.NewGuid(), "user@Email.com", "user password", "name", "surname", "address", "123432", UserRole.CITIZEN);
 
-        var token = await AuthHelper.GetAuthToken("user@Email.com", "user password");
-        Assert.NotNull(token);
+        var client = new RestClient("http://localhost:5062/ilib/v1/auth/login");
+        var request = new RestRequest();
+        request.AddHeader("Content-Type", "application/json");
+        request.AddJsonBody(new { email = "user@Email.com", password = "user password" });
+
+        var response = await client.ExecutePostAsync(request);
+        Assert.Equal(System.Net.HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("application/json", response.ContentType);
+
+        var content = response.Content;
+        var jsonResponse = JObject.Parse(content!);
+
+        Assert.True(jsonResponse.ContainsKey("token"));
+        Assert.True(jsonResponse.ContainsKey("userId"));
+        Assert.True(jsonResponse.ContainsKey("role"));
     }
+
 
     [Theory]
     [InlineData("user@example.com", "wrongpassword")]

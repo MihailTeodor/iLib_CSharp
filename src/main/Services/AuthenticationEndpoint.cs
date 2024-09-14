@@ -27,7 +27,7 @@ namespace iLib.src.main.Services
                 }
 
                 var token = JwtHelper.GenerateToken(user.Id, user.Email, user.Role.ToString());
-                return Ok(new { token });
+                return Ok(new { token, userId = user.Id, role = user.Role.ToString() });
             }
             catch (SearchHasGivenNoResultsException)
             {
