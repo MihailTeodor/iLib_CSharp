@@ -71,6 +71,8 @@ namespace iLib.src.main.Controllers
                 bookingToCancel.BookedArticle.State = ArticleState.AVAILABLE;
             
             bookingToCancel.State = BookingState.CANCELLED;
+
+            _bookingDao.Save(bookingToCancel);
         }
 
         public IList<Booking> GetBookingsByUser(Guid userId, int fromIndex, int limit)
