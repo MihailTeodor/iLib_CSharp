@@ -14,9 +14,12 @@ namespace iLib.src.main.DTO
         public List<BookingDTO>? Bookings { get; set; }
         public List<LoanDTO>? Loans { get; set; }
 
+        public long TotalBookings { get; set; }
+        public long TotalLoans { get; set; }
+
         protected UserDashboardDTO() {}
 
-        public UserDashboardDTO(User user, List<Booking>? bookings, List<Loan>? loans)
+        public UserDashboardDTO(User user, List<Booking>? bookings, List<Loan>? loans, long totalBookings, long totalLoans)
         {
             Id = user.Id;
             Name = user.Name;
@@ -34,6 +37,9 @@ namespace iLib.src.main.DTO
             {
                 Loans = loans.Select(loan => new LoanDTO(loan)).ToList();
             }
+
+            TotalBookings = totalBookings;
+            TotalLoans = totalLoans;
         }
     }
 }

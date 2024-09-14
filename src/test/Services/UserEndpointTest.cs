@@ -76,6 +76,9 @@ public async Task TestGetUser_WhereRequestingUserIsAdmin_CanRequestInfo()
 
     var loansArray = content["loans"] as JArray;
     Assert.Null(loansArray);
+
+    Assert.Equal(1, content["totalBookings"]);
+    Assert.Equal(0, content["totalLoans"]);
 }
 
 
@@ -127,6 +130,9 @@ public async Task TestGetUser_WhereRequestingUserIsSameUser_CanRequestInfo()
 
     var loansArray = content["loans"] as JArray;
     Assert.Null(loansArray);
+
+    Assert.Equal(1, content["totalBookings"]);
+    Assert.Equal(0, content["totalLoans"]);
 }
 
 

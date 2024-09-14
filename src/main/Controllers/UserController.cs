@@ -108,7 +108,9 @@ namespace iLib.src.main.Controllers
                 loans = null;
             }
 
-            return new UserDashboardDTO(user, bookings, loans);
+            var totalBookings = _bookingController.CountBookingsByUser(user.Id);
+            var totalLoans = _loanController.CountLoansByUser(user.Id);
+            return new UserDashboardDTO(user, bookings, loans, totalBookings, totalLoans);
         }
     }
 }

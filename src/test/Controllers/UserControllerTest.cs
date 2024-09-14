@@ -204,6 +204,8 @@ public class UserControllerTest
         _userDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns(mockUser.Object);
         _bookingControllerMock.Setup(x => x.GetBookingsByUser(It.IsAny<Guid>(), 0, 5)).Returns([mockBooking.Object]);
         _loanControllerMock.Setup(x => x.GetLoansByUser(It.IsAny<Guid>(), 0, 5)).Returns([mockLoan.Object]);
+        _bookingControllerMock.Setup(x => x.CountBookingsByUser(It.IsAny<Guid>())).Returns(1);
+        _loanControllerMock.Setup(x => x.CountLoansByUser(It.IsAny<Guid>())).Returns(1);
 
         var result = _userController.GetUserInfoExtended(Guid.NewGuid());
 
@@ -219,5 +221,8 @@ public class UserControllerTest
 
         result.Loans.Should().HaveCount(1);
         result.Loans![0].Id.Should().Be(mockLoan.Object.Id);
+
+        result.TotalBookings.Should().Be(1);
+        result.TotalLoans.Should().Be(1);
     }
 }
