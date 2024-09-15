@@ -353,44 +353,71 @@ public void TestUpdateArticle_StateTransitions_HandledCorrectly(ArticleState ini
 
     public static IEnumerable<object[]> TestGetArticleInfoArgumentsProvider()
     {
-        yield return new object[] { ArticleState.BOOKED, typeof(Booking) };
-        yield return new object[] { ArticleState.ONLOAN, typeof(Loan) };
-        yield return new object[] { ArticleState.ONLOANBOOKED, typeof(Loan) };
-        yield return new object[] { ArticleState.AVAILABLE, null! };
-        yield return new object[] { ArticleState.UNAVAILABLE, null! };
+        yield return new object[] { ArticleState.BOOKED };
+        yield return new object[] { ArticleState.ONLOAN };
+        yield return new object[] { ArticleState.ONLOANBOOKED };
+        yield return new object[] { ArticleState.AVAILABLE };
+        yield return new object[] { ArticleState.UNAVAILABLE };
     }
 
     [Theory]
     [MemberData(nameof(TestGetArticleInfoArgumentsProvider))]
-    public void TestGetArticleInfoExtended_WhenArticleExists_CallsValidateState(ArticleState state, Type validationClass)
+    public void TestGetArticleInfoExtended_WhenArticleExists_CallsValidateState(ArticleState state)
     {
         var mockArticle = new Mock<Article>();
+        var mockUser  = new Mock<User>();
+        mockArticle.Setup(x => x.Id).Returns(Guid.NewGuid());
+        mockUser.Setup(x => x.Id).Returns(Guid.NewGuid());
         mockArticle.Setup(x => x.State).Returns(state);
         _articleDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns(mockArticle.Object);
 
         Booking mockBooking = null!;
         Loan mockLoan = null!;
 
-        if (validationClass == typeof(Booking))
+        if (state == ArticleState.BOOKED)
         {
             mockBooking = new Mock<Booking>().Object;
+            mockBooking.BookedArticle = mockArticle.Object;
+            mockBooking.BookingUser = mockUser.Object;
             _bookingDaoMock.Setup(x => x.SearchBookings(null, mockArticle.Object, 0, 1)).Returns([mockBooking]);
         }
-        else if (validationClass == typeof(Loan))
+        else if (state == ArticleState.ONLOAN)
         {
             mockLoan = new Mock<Loan>().Object;
+            mockLoan.ArticleOnLoan = mockArticle.Object;
+            mockLoan.LoaningUser = mockUser.Object;
+            _loanDaoMock.Setup(x => x.SearchLoans(null, mockArticle.Object, 0, 1)).Returns([mockLoan]);
+        }
+        else if (state == ArticleState.ONLOANBOOKED)
+        {
+            mockBooking = new Mock<Booking>().Object;
+            mockBooking.BookedArticle = mockArticle.Object;
+            mockBooking.BookingUser = mockUser.Object;
+            _bookingDaoMock.Setup(x => x.SearchBookings(null, mockArticle.Object, 0, 1)).Returns([mockBooking]);
+
+            mockLoan = new Mock<Loan>().Object;
+            mockLoan.ArticleOnLoan = mockArticle.Object;
+            mockLoan.LoaningUser = mockUser.Object;
             _loanDaoMock.Setup(x => x.SearchLoans(null, mockArticle.Object, 0, 1)).Returns([mockLoan]);
         }
 
         _articleController.GetArticleInfoExtended(Guid.NewGuid());
 
-        if (validationClass == typeof(Booking))
+        if (state == ArticleState.BOOKED)
         {
             _bookingDaoMock.Verify(x => x.SearchBookings(null, mockArticle.Object, 0, 1), Times.Once);
             Mock.Get(mockBooking).Verify(x => x.ValidateState(), Times.Once);
         }
-        else if (validationClass == typeof(Loan))
+        else if (state == ArticleState.ONLOAN)
         {
+            _loanDaoMock.Verify(x => x.SearchLoans(null, mockArticle.Object, 0, 1), Times.Once);
+            Mock.Get(mockLoan).Verify(x => x.ValidateState(), Times.Once);
+        }
+        else if (state == ArticleState.ONLOANBOOKED)
+        {
+            _bookingDaoMock.Verify(x => x.SearchBookings(null, mockArticle.Object, 0, 1), Times.Once);
+            Mock.Get(mockBooking).Verify(x => x.ValidateState(), Times.Once);
+
             _loanDaoMock.Verify(x => x.SearchLoans(null, mockArticle.Object, 0, 1), Times.Once);
             Mock.Get(mockLoan).Verify(x => x.ValidateState(), Times.Once);
         }
@@ -400,53 +427,64 @@ public void TestUpdateArticle_StateTransitions_HandledCorrectly(ArticleState ini
     [InlineData(ArticleState.BOOKED)]
     [InlineData(ArticleState.ONLOAN)]
     [InlineData(ArticleState.ONLOANBOOKED)]
-    public void TestGetArticleInfoExtended_WhenArticleExists_ReturnsArticleDTO(ArticleState state)
+public void TestGetArticleInfoExtended_WhenArticleExists_ReturnsArticleDTO(ArticleState state)
+{
+    var mockArticle = new Mock<Article>();
+    var mockBooking = new Mock<Booking>();
+    var mockLoan = new Mock<Loan>();
+    var mockUser = new Mock<User>();
+    var today = DateTime.Now;
+
+    mockUser.Setup(x => x.Id).Returns(Guid.NewGuid());
+
+    mockArticle.Setup(x => x.Id).Returns(Guid.NewGuid());
+    mockArticle.Setup(x => x.Title).Returns("Cujo");
+    mockArticle.Setup(x => x.Location).Returns("upstairs");
+    mockArticle.Setup(x => x.YearEdition).Returns(today.AddYears(-1));
+    mockArticle.Setup(x => x.Publisher).Returns("publisher");
+    mockArticle.Setup(x => x.Genre).Returns("horror");
+    mockArticle.Setup(x => x.Description).Returns("description");
+    mockArticle.Setup(x => x.State).Returns(state);
+
+    mockBooking.Setup(x => x.BookingEndDate).Returns(today.AddDays(1));
+    mockBooking.Setup(x => x.BookedArticle).Returns(mockArticle.Object);
+    mockBooking.Setup(x => x.BookingUser).Returns(mockUser.Object);
+    _bookingDaoMock.Setup(x => x.SearchBookings(null, mockArticle.Object, 0, 1))
+                   .Returns(new List<Booking> { mockBooking.Object });
+
+    mockLoan.Setup(x => x.DueDate).Returns(today.AddDays(7));
+    mockLoan.Setup(x => x.ArticleOnLoan).Returns(mockArticle.Object);
+    mockLoan.Setup(x => x.LoaningUser).Returns(mockUser.Object);
+    _loanDaoMock.Setup(x => x.SearchLoans(null, mockArticle.Object, 0, 1))
+                .Returns(new List<Loan> { mockLoan.Object });
+
+    _articleDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns(mockArticle.Object);
+
+    var resultDTO = _articleController.GetArticleInfoExtended(Guid.NewGuid());
+
+    resultDTO.Should().NotBeNull();
+    resultDTO!.Id.Should().Be(mockArticle.Object.Id);
+    resultDTO.Title.Should().Be("Cujo");
+    resultDTO.Location.Should().Be("upstairs");
+    resultDTO.YearEdition.Should().Be(today.AddYears(-1));
+    resultDTO.Publisher.Should().Be("publisher");
+    resultDTO.Genre.Should().Be("horror");
+    resultDTO.Description.Should().Be("description");
+    resultDTO.State.Should().Be(state);
+
+    if (state == ArticleState.ONLOAN || state == ArticleState.ONLOANBOOKED)
     {
-        var mockArticle = new Mock<Article>();
-        var mockBooking = new Mock<Booking>();
-        var mockLoan = new Mock<Loan>();
-        var today = DateTime.Now;
-
-        mockArticle.Setup(x => x.Id).Returns(Guid.NewGuid());
-        mockArticle.Setup(x => x.Title).Returns("Cujo");
-        mockArticle.Setup(x => x.Location).Returns("upstairs");
-        mockArticle.Setup(x => x.YearEdition).Returns(today.AddYears(-1));
-        mockArticle.Setup(x => x.Publisher).Returns("publisher");
-        mockArticle.Setup(x => x.Genre).Returns("horror");
-        mockArticle.Setup(x => x.Description).Returns("description");
-        mockArticle.Setup(x => x.State).Returns(state);
-
-        mockBooking.Setup(x => x.BookingEndDate).Returns(today.AddDays(1));
-        _bookingDaoMock.Setup(x => x.SearchBookings(null, mockArticle.Object, 0, 1)).Returns([mockBooking.Object]);
-
-        mockLoan.Setup(x => x.DueDate).Returns(today.AddDays(7));
-        _loanDaoMock.Setup(x => x.SearchLoans(null, mockArticle.Object, 0, 1)).Returns([mockLoan.Object]);
-
-        _articleDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns(mockArticle.Object);
-
-        var resultDTO = _articleController.GetArticleInfoExtended(Guid.NewGuid());
-
-        resultDTO.Should().NotBeNull();
-        resultDTO!.Id.Should().Be(mockArticle.Object.Id);
-        resultDTO.Title.Should().Be("Cujo");
-        resultDTO.Location.Should().Be("upstairs");
-        resultDTO.YearEdition.Should().Be(today.AddYears(-1));
-        resultDTO.Publisher.Should().Be("publisher");
-        resultDTO.Genre.Should().Be("horror");
-        resultDTO.Description.Should().Be("description");
-        resultDTO.State.Should().Be(state);
-
-        if (state == ArticleState.BOOKED)
-        {
-            resultDTO.BookingEndDate.Should().Be(today.AddDays(1));
-            resultDTO.LoanDueDate.Should().BeNull();
-        }
-        else
-        {
-            resultDTO.BookingEndDate.Should().BeNull();
-            resultDTO.LoanDueDate.Should().Be(today.AddDays(7));
-        }
+        resultDTO.LoanDTO!.ArticleId.Should().Be(mockLoan.Object.ArticleOnLoan!.Id);
+        resultDTO.LoanDTO.LoaningUserId.Should().Be(mockLoan.Object.LoaningUser!.Id);
     }
+
+    if (state == ArticleState.BOOKED || state == ArticleState.ONLOANBOOKED)
+    {
+        resultDTO.BookingDTO!.BookedArticleId.Should().Be(mockBooking.Object.BookedArticle!.Id);
+        resultDTO.BookingDTO.BookingUserId.Should().Be(mockBooking.Object.BookingUser!.Id);
+    }
+}
+
 
     [Fact]
     public void TestSearchArticles_WhenNoResults_ThrowsSearchHasGivenNoResultsException()

@@ -490,7 +490,7 @@ public class ArticleEndpointTest
         Assert.Equal("Article deleted successfully.", content["message"]!.ToString());
     }
 
-    public static ArticleDTO CreateArticleDTO(Guid? id, ArticleType? type, string? location, string? title, DateTime? yearEdition, string? publisher, string? genre, string? description, ArticleState? state, string? author, string? isbn, int? issueNumber, string? issn, string? director, string? isan, DateTime? loanDueDate, DateTime? bookingEndDate)
+    public static ArticleDTO CreateArticleDTO(Guid? id, ArticleType? type, string? location, string? title, DateTime? yearEdition, string? publisher, string? genre, string? description, ArticleState? state, string? author, string? isbn, int? issueNumber, string? issn, string? director, string? isan, LoanDTO? loanDTO, BookingDTO? bookingDTO)
     {
         return new ArticleDTO
         {
@@ -509,8 +509,8 @@ public class ArticleEndpointTest
             Issn = issn,
             Director = director,
             Isan = isan,
-            LoanDueDate = loanDueDate,
-            BookingEndDate = bookingEndDate
+            LoanDTO = loanDTO,
+            BookingDTO = bookingDTO
         };
     }
 }

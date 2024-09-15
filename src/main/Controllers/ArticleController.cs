@@ -160,31 +160,36 @@ namespace iLib.src.main.Controllers
         {
             var article = _articleDao.FindById(articleId) ?? throw new ArticleDoesNotExistException("Article does not exist!");
             List<Loan>? loans;
-            DateTime? loanDueDate = null;
-            DateTime? bookingEndDate = null;
+            List<Booking>? bookings;
+            LoanDTO? loanDTO = null;
+            BookingDTO? bookingDTO = null;
 
             switch (article.State)
             {
                 case ArticleState.BOOKED:
-                    var bookings = _bookingDao.SearchBookings(null, article, 0, 1);
+                    bookings = [.. _bookingDao.SearchBookings(null, article, 0, 1)];
                     bookings.First().ValidateState();
-                    bookingEndDate = bookings.First().BookingEndDate;
+                    bookingDTO = new BookingDTO(bookings.First());
                     break;
                 case ArticleState.ONLOAN:
+                    loans = [.. _loanDao.SearchLoans(null, article, 0, 1)];
+                    loans.First().ValidateState();
+                    loanDTO = new LoanDTO(loans.First());
+                    break;
                 case ArticleState.ONLOANBOOKED:
+                    bookings = [.. _bookingDao.SearchBookings(null, article, 0, 1)];
+                    bookings.First().ValidateState();
+                    bookingDTO = new BookingDTO(bookings.First());
 
-                    loans = _loanDao.SearchLoans(null, article, 0, 1)?.ToList();
-                    if (loans != null && loans.Count != 0)
-                    {
-                        loans.First().ValidateState();
-                        loanDueDate = loans.First().DueDate;
-                    }
+                    loans = [.. _loanDao.SearchLoans(null, article, 0, 1)];
+                    loans.First().ValidateState();
+                    loanDTO = new LoanDTO(loans.First());
                     break;
                 default:
                     break;
             }
 
-            return ArticleMapper.ToDTO(article, loanDueDate, bookingEndDate);
+            return ArticleMapper.ToDTO(article, loanDTO, bookingDTO);
         }
     }
 }

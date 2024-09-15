@@ -4,7 +4,7 @@ namespace iLib.src.main.DTO
 {
     public static class ArticleMapper
     {
-        public static ArticleDTO? ToDTO(Article article, DateTime? loanDueDate, DateTime? bookingEndDate)
+        public static ArticleDTO? ToDTO(Article article, LoanDTO? loanDTO, BookingDTO? bookingDTO)
         {
             if (article == null)
                 return null;
@@ -19,8 +19,8 @@ namespace iLib.src.main.DTO
                 Genre = article.Genre,
                 Description = article.Description,
                 State = article.State,
-                LoanDueDate = loanDueDate,
-                BookingEndDate = bookingEndDate
+                LoanDTO = loanDTO,
+                BookingDTO = bookingDTO
             };
 
             switch (article)

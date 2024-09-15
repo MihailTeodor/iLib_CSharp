@@ -35,5 +35,10 @@ namespace iLib.src.main.DTO
             BookingEndDate = booking.BookingEndDate;
             State = booking.State;
         }
+
+        public static explicit operator BookingDTO(Booking v)
+        {
+            throw new NotImplementedException();
+        }
     }
 }

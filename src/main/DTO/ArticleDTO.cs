@@ -37,9 +37,8 @@ namespace iLib.src.main.DTO
         public string? Issn { get; set; }
         public string? Director { get; set; }
         public string? Isan { get; set; }
-        public DateTime? LoanDueDate { get; set; }
-        public DateTime? BookingEndDate { get; set; }
-
+        public BookingDTO? BookingDTO{ get; set; }
+        public LoanDTO? LoanDTO{ get; set; }
         public ArticleDTO() { }
 
     }
