@@ -10,6 +10,7 @@ public class BookingControllerTest
 {
     private readonly BookingController _bookingController;
     private readonly Mock<IBookingDao> _bookingDaoMock;
+    private readonly Mock<ILoanDao> _loanDaoMock;
     private readonly Mock<IUserDao> _userDaoMock;
     private readonly Mock<IArticleDao> _articleDaoMock;
     private readonly DateTime _today = DateTime.Now;
@@ -17,11 +18,13 @@ public class BookingControllerTest
     public BookingControllerTest()
     {
         _bookingDaoMock = new Mock<IBookingDao>();
+        _loanDaoMock = new Mock<ILoanDao>();
         _userDaoMock = new Mock<IUserDao>();
         _articleDaoMock = new Mock<IArticleDao>();
 
         _bookingController = new BookingController(
             _bookingDaoMock.Object,
+            _loanDaoMock.Object,
             _userDaoMock.Object,
             _articleDaoMock.Object
         );
@@ -68,6 +71,27 @@ public class BookingControllerTest
         act.Should().Throw<iLib.src.main.Exceptions.InvalidOperationException>().WithMessage(expectedMessage);
     }
 
+    [Theory]
+    [InlineData(LoanState.ACTIVE)]
+    [InlineData(LoanState.OVERDUE)]
+    public void TestRegisterBooking_WhenUserHasArticleOnLoan_ThrowsInvalidOperationException(LoanState state)
+    {
+        var userMock = new Mock<User>();
+        var articleMock = new Mock<Article>();
+        var loanMock = new Mock<Loan>();
+
+        _userDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns(userMock.Object);
+        _articleDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns(articleMock.Object);
+        articleMock.Setup(x => x.State).Returns(ArticleState.ONLOAN);
+        loanMock.Setup(x => x.State).Returns(state);
+        _loanDaoMock.Setup(x => x.SearchLoans(userMock.Object, articleMock.Object, 0, 1)).Returns([loanMock.Object]);
+
+        Action act = () => _bookingController.RegisterBooking(Guid.NewGuid(), Guid.NewGuid());
+
+        act.Should().Throw<iLib.src.main.Exceptions.InvalidOperationException>()
+            .WithMessage("Cannot register Booking, selected user has selected Article currently on loan!");
+    }
+
 [Theory]
 [MemberData(nameof(TestRegisterBooking_SuccessfulRegistrationArgumentsProvider))]
 public void TestRegisterBooking_SuccessfulRegistration(ArticleState initialState, ArticleState expectedState)
@@ -82,6 +106,9 @@ public void TestRegisterBooking_SuccessfulRegistration(ArticleState initialState
     Booking capturedBooking = null!;
     _bookingDaoMock.Setup(x => x.Save(It.IsAny<Booking>()))
                    .Callback<Booking>(booking => capturedBooking = booking);
+
+    _loanDaoMock.Setup(x => x.SearchLoans(It.IsAny<User>(), It.IsAny<Article>(), It.IsAny<int>(), It.IsAny<int>()))
+                .Returns([]);
 
     var returnedId = _bookingController.RegisterBooking(Guid.NewGuid(), Guid.NewGuid());
 

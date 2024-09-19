@@ -6,9 +6,10 @@ using iLib.src.main.IControllers;
 
 namespace iLib.src.main.Controllers
 {
-    public class BookingController(IBookingDao bookingDao, IUserDao userDao, IArticleDao articleDao) : IBookingController
+    public class BookingController(IBookingDao bookingDao, ILoanDao loanDao, IUserDao userDao, IArticleDao articleDao) : IBookingController
     {
         private readonly IBookingDao _bookingDao = bookingDao;
+        private readonly ILoanDao _loanDao = loanDao;
         private readonly IUserDao _userDao = userDao;
         private readonly IArticleDao _articleDao = articleDao;
         private readonly DateTime _today = DateTime.Now;
@@ -38,6 +39,9 @@ namespace iLib.src.main.Controllers
                     bookedArticle.State = ArticleState.BOOKED;
                     break;
                 case ArticleState.ONLOAN:
+                    var existingLoans = _loanDao.SearchLoans(bookingUser, bookedArticle, 0, 1);
+                    if(existingLoans.Count > 0 && (existingLoans.First().State == LoanState.ACTIVE || existingLoans.First().State == LoanState.OVERDUE))
+                        throw new Exceptions.InvalidOperationException("Cannot register Booking, selected user has selected Article currently on loan!");
                     bookedArticle.State = ArticleState.ONLOANBOOKED;
                     break;
             }
