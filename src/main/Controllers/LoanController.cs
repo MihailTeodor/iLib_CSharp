@@ -78,6 +78,8 @@ namespace iLib.src.main.Controllers
             }
 
             loanToReturn.State = LoanState.RETURNED;
+
+            _loanDao.Save(loanToReturn);
         }
 
         public LoanDTO GetLoanInfo(Guid loanId)
