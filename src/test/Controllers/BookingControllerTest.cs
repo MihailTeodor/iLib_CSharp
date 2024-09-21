@@ -98,6 +98,7 @@ public void TestRegisterBooking_SuccessfulRegistration(ArticleState initialState
 {
     var userMock = new Mock<User>();
     var articleMock = new Mock<Article>();
+    var loanMock = new Mock<Loan>();
 
     _userDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns(userMock.Object);
     _articleDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns(articleMock.Object);
@@ -108,7 +109,15 @@ public void TestRegisterBooking_SuccessfulRegistration(ArticleState initialState
                    .Callback<Booking>(booking => capturedBooking = booking);
 
     _loanDaoMock.Setup(x => x.SearchLoans(It.IsAny<User>(), It.IsAny<Article>(), It.IsAny<int>(), It.IsAny<int>()))
-                .Returns([]);
+            .Returns([]);        
+            
+    if (initialState == ArticleState.ONLOAN)
+    {
+        loanMock.Setup(x => x.DueDate).Returns(DateTime.Now.AddMonths(1));
+
+        _loanDaoMock.Setup(x => x.SearchLoans(null, It.IsAny<Article>(), It.IsAny<int>(), It.IsAny<int>()))
+                .Returns([loanMock.Object]);        
+    }
 
     var returnedId = _bookingController.RegisterBooking(Guid.NewGuid(), Guid.NewGuid());
 
@@ -123,6 +132,8 @@ public void TestRegisterBooking_SuccessfulRegistration(ArticleState initialState
     if (initialState == ArticleState.AVAILABLE)
     {
         capturedBooking.BookingEndDate.Date.Should().Be(_today.AddDays(3).Date);
+    } else {
+        capturedBooking.BookingEndDate.Date.Should().Be(loanMock.Object.DueDate.AddDays(3).Date);
     }
 }
 

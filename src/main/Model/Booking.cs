@@ -18,11 +18,12 @@ namespace iLib.src.main.Model
             {
                 if (BookingEndDate < DateTime.Now)
                 {
-                    if (BookedArticle != null)
+                    State = BookingState.EXPIRED;
+                    // at this point, the state of the booked article can be only one of {UNAVAILBLE, BOOKED}
+                    if (BookedArticle!.State == ArticleState.BOOKED)
                     {
                         BookedArticle.State = ArticleState.AVAILABLE;
                     }
-                    State = BookingState.CANCELLED;
                 }
             }
             else

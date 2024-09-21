@@ -3,6 +3,7 @@ using iLib.src.main.DTO;
 using iLib.src.main.Exceptions;
 using iLib.src.main.Model;
 using iLib.src.main.IControllers;
+using NHibernate.Util;
 
 namespace iLib.src.main.Controllers
 {
@@ -43,6 +44,7 @@ namespace iLib.src.main.Controllers
                     if(existingLoans.Count > 0 && (existingLoans.First().State == LoanState.ACTIVE || existingLoans.First().State == LoanState.OVERDUE))
                         throw new Exceptions.InvalidOperationException("Cannot register Booking, selected user has selected Article currently on loan!");
                     bookedArticle.State = ArticleState.ONLOANBOOKED;
+                    bookingToRegister.BookingEndDate = _loanDao.SearchLoans(null, bookedArticle, 0, 1).First().DueDate.AddDays(3);
                     break;
             }
 

@@ -28,15 +28,29 @@ public class BookingTest
     }
 
     [Fact]
-    public void TestValidateState_WhenBookingEndDatePassed_ChangesArticleAndBookingStateAccordingly()
+    public void TestValidateState_WhenBookingEndDatePassedAndArticleStateIsBOOKED_ChangesArticleAndBookingStateAccordingly()
     {
         _booking.State = BookingState.ACTIVE;
         _booking.BookingEndDate = DateTime.Now.AddDays(-1);
+        _article.State = ArticleState.BOOKED;
 
         _booking.ValidateState();
 
         _booking.BookedArticle?.State.Should().Be(ArticleState.AVAILABLE);
-        _booking.State.Should().Be(BookingState.CANCELLED);
+        _booking.State.Should().Be(BookingState.EXPIRED);
+    }
+
+    [Fact]
+    public void TestValidateState_WhenBookingEndDatePassedAndArticleStateIsUNAVAILBLE_ChangesOnlyBookingStateAccordingly()
+    {
+        _booking.State = BookingState.ACTIVE;
+        _booking.BookingEndDate = DateTime.Now.AddDays(-1);
+        _article.State = ArticleState.UNAVAILABLE;
+
+        _booking.ValidateState();
+
+        _booking.BookedArticle?.State.Should().Be(ArticleState.UNAVAILABLE);
+        _booking.State.Should().Be(BookingState.EXPIRED);
     }
 
     [Fact]
