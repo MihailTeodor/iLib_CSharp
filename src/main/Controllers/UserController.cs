@@ -27,7 +27,7 @@ namespace iLib.src.main.Controllers
             if (tmpUser != null)
                 throw new ArgumentException("Email already registered!");
 
-            if (string.IsNullOrEmpty(userDTO.PlainPassword))
+            if (string.IsNullOrWhiteSpace(userDTO.PlainPassword))
                 throw new ArgumentException("Password is required!");
 
             var userToAdd = userDTO.ToEntity();
@@ -41,7 +41,7 @@ namespace iLib.src.main.Controllers
         public void UpdateUser(Guid id, UserDTO userDTO)
         {
             var userToUpdate = _userDao.FindById(id) ?? throw new UserDoesNotExistException("User does not exist!");
-            if (!string.IsNullOrEmpty(userDTO.PlainPassword))
+            if (!string.IsNullOrWhiteSpace(userDTO.PlainPassword))
                 userToUpdate.Password = PasswordUtils.HashPassword(userDTO.PlainPassword);
 
             userToUpdate.Email = userDTO.Email;
@@ -58,7 +58,7 @@ namespace iLib.src.main.Controllers
             IList<User> retrievedUsers = [];
             try
             {
-                if (!string.IsNullOrEmpty(email))
+                if (!string.IsNullOrWhiteSpace(email))
                 {
                     var user = _userDao.FindUserByEmail(email);
                     if (user != null)
@@ -82,7 +82,7 @@ namespace iLib.src.main.Controllers
 
         public long CountUsers(string? email, string? name, string? surname, string? telephoneNumber)
         {
-            return string.IsNullOrEmpty(email) ? _userDao.CountUsers(name, surname, telephoneNumber) : 1;
+            return string.IsNullOrWhiteSpace(email) ? _userDao.CountUsers(name, surname, telephoneNumber) : 1;
         }
 
         public UserDashboardDTO GetUserInfoExtended(Guid id)

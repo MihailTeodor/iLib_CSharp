@@ -31,9 +31,9 @@ namespace iLib.src.main.Controllers
                 case ArticleType.BOOK:
                     if (articleToUpdate is not Book book)
                         throw new ArgumentException("Cannot change type of Article");
-                    if (articleDTO.Isbn == null)
+                    if (string.IsNullOrWhiteSpace(articleDTO.Isbn))
                         throw new ArgumentException("Article identifier is required");
-                    if (articleDTO.Author == null)
+                    if (string.IsNullOrWhiteSpace(articleDTO.Author))
                         throw new ArgumentException("Author is required!");
                     book.Isbn = articleDTO.Isbn;
                     book.Author = articleDTO.Author;
@@ -41,7 +41,7 @@ namespace iLib.src.main.Controllers
                 case ArticleType.MAGAZINE:
                     if (articleToUpdate is not Magazine magazine)
                         throw new ArgumentException("Cannot change type of Article");
-                    if (articleDTO.Issn == null)
+                    if (string.IsNullOrWhiteSpace(articleDTO.Issn))
                         throw new ArgumentException("Article identifier is required");
                     if (articleDTO.IssueNumber == null)
                         throw new ArgumentException("Issue number is required!");
@@ -51,9 +51,9 @@ namespace iLib.src.main.Controllers
                 case ArticleType.MOVIEDVD:
                     if (articleToUpdate is not MovieDVD movieDVD)
                         throw new ArgumentException("Cannot change type of Article");
-                    if (articleDTO.Isan == null)
+                    if (string.IsNullOrWhiteSpace(articleDTO.Isan))
                         throw new ArgumentException("Article identifier is required");
-                    if (articleDTO.Director == null)
+                    if (string.IsNullOrWhiteSpace(articleDTO.Director))
                         throw new ArgumentException("Director is required!");
                     movieDVD.Isan = articleDTO.Isan;
                     movieDVD.Director = articleDTO.Director;
@@ -87,15 +87,15 @@ namespace iLib.src.main.Controllers
         {
             IList<Article> retrievedArticles = [];
 
-            if (!string.IsNullOrEmpty(isbn))
+            if (!string.IsNullOrWhiteSpace(isbn))
             {
                 retrievedArticles = _bookDao.FindBooksByIsbn(isbn).Cast<Article>().ToList();
             }
-            else if (!string.IsNullOrEmpty(issn))
+            else if (!string.IsNullOrWhiteSpace(issn))
             {
                 retrievedArticles = _magazineDao.FindMagazinesByIssn(issn).Cast<Article>().ToList();
             }
-            else if (!string.IsNullOrEmpty(isan))
+            else if (!string.IsNullOrWhiteSpace(isan))
             { 
                 retrievedArticles = _movieDVDDao.FindMoviesByIsan(isan).Cast<Article>().ToList();
             }
@@ -115,15 +115,15 @@ namespace iLib.src.main.Controllers
         {
             long count = 0;
 
-            if (!string.IsNullOrEmpty(isbn))
+            if (!string.IsNullOrWhiteSpace(isbn))
             {
                 count = _bookDao.CountBooksByIsbn(isbn);
             }
-            else if (!string.IsNullOrEmpty(issn))
+            else if (!string.IsNullOrWhiteSpace(issn))
             {
                 count = _magazineDao.CountMagazinesByIssn(issn);
             }
-            else if (!string.IsNullOrEmpty(isan))
+            else if (!string.IsNullOrWhiteSpace(isan))
             {
                 count = _movieDVDDao.CountMoviesByIsan(isan);
             }

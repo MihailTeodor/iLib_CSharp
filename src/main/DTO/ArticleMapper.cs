@@ -58,10 +58,10 @@ namespace iLib.src.main.DTO
 
         private static Book CreateBook(ArticleDTO dto)
         {
-            if (dto.Isbn == null)
+            if (string.IsNullOrWhiteSpace(dto.Isbn))
                 throw new ArgumentException("Article identifier is required");
 
-            if (dto.Author == null)
+            if (string.IsNullOrWhiteSpace(dto.Author))
                 throw new ArgumentException("Author is required");
 
             var book = ModelFactory.CreateBook();
@@ -78,7 +78,7 @@ namespace iLib.src.main.DTO
 
         private static Magazine CreateMagazine(ArticleDTO dto)
         {
-            if (dto.Issn == null)
+            if (string.IsNullOrWhiteSpace(dto.Issn))
                 throw new ArgumentException("Article identifier is required");
 
             if (dto.IssueNumber == null)
@@ -98,16 +98,16 @@ namespace iLib.src.main.DTO
 
         private static MovieDVD CreateMovieDVD(ArticleDTO dto)
         {
-            if (dto.Isan == null)
+            if (string.IsNullOrWhiteSpace(dto.Isan))
                 throw new ArgumentException("Article identifier is required");
 
-            if (dto.Director == null)
+            if (string.IsNullOrWhiteSpace(dto.Director))
                 throw new ArgumentException("Director is required");
 
             var movieDVD = ModelFactory.CreateMovieDVD();
             movieDVD.Title = dto.Title;
             movieDVD.Location = dto.Location;
-            movieDVD.YearEdition = dto.YearEdition ?? default(DateTime);
+            movieDVD.YearEdition = dto.YearEdition ?? default;
             movieDVD.Publisher = dto.Publisher;
             movieDVD.Genre = dto.Genre;
             movieDVD.Description = dto.Description;
