@@ -87,6 +87,7 @@ namespace iLib.src.main.Controllers
             var loan = _loanDao.FindById(loanId) ?? throw new LoanDoesNotExistException("Specified Loan not registered in the system!");
             if (loan.State == LoanState.ACTIVE)
                 loan.ValidateState();
+                _loanDao.Save(loan);
 
             return new LoanDTO(loan);
         }
@@ -103,6 +104,7 @@ namespace iLib.src.main.Controllers
             {
                 if (loan.State == LoanState.ACTIVE)
                     loan.ValidateState();
+                    _loanDao.Save(loan);
             }
 
             return userLoans;

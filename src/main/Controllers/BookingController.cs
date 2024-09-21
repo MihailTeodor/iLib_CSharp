@@ -63,6 +63,7 @@ namespace iLib.src.main.Controllers
             var booking = _bookingDao.FindById(bookingId) ?? throw new BookingDoesNotExistException("Specified Booking not registered in the system!");
             if (booking.State == BookingState.ACTIVE)
                 booking.ValidateState();
+                _bookingDao.Save(booking);
 
             return new BookingDTO(booking);
         }
@@ -93,6 +94,7 @@ namespace iLib.src.main.Controllers
             {
                 if (booking.State == BookingState.ACTIVE)
                     booking.ValidateState();
+                    _bookingDao.Save(booking);
             }
 
             return userBookings;

@@ -170,19 +170,23 @@ namespace iLib.src.main.Controllers
                     bookings = [.. _bookingDao.SearchBookings(null, article, 0, 1)];
                     bookings.First().ValidateState();
                     bookingDTO = new BookingDTO(bookings.First());
+                    _bookingDao.Save(bookings.First());
                     break;
                 case ArticleState.ONLOAN:
                     loans = [.. _loanDao.SearchLoans(null, article, 0, 1)];
                     loans.First().ValidateState();
                     loanDTO = new LoanDTO(loans.First());
+                    _loanDao.Save(loans.First());
                     break;
                 case ArticleState.ONLOANBOOKED:
                     bookings = [.. _bookingDao.SearchBookings(null, article, 0, 1)];
                     bookings.First().ValidateState();
+                    _bookingDao.Save(bookings.First());
                     bookingDTO = new BookingDTO(bookings.First());
 
                     loans = [.. _loanDao.SearchLoans(null, article, 0, 1)];
                     loans.First().ValidateState();
+                    _loanDao.Save(loans.First());
                     loanDTO = new LoanDTO(loans.First());
                     break;
                 default:
