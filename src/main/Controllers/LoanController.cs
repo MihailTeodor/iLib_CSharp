@@ -113,10 +113,17 @@ namespace iLib.src.main.Controllers
         public void ExtendLoan(Guid loanId)
         {
             var loanToExtend = _loanDao.FindById(loanId) ?? throw new LoanDoesNotExistException("Cannot extend Loan! Loan does not exist!");
-            if (loanToExtend.ArticleOnLoan?.State == ArticleState.ONLOAN)
-                loanToExtend.DueDate = _today.AddMonths(1);
-            else
+            if (loanToExtend.State != LoanState.ACTIVE)
+                throw new Exceptions.InvalidOperationException("Cannot extend loan, selected loan is not Active!");
+            if (loanToExtend.ArticleOnLoan!.State == ArticleState.ONLOANBOOKED)
                 throw new Exceptions.InvalidOperationException("Cannot extend loan, another User has booked the Article!");
+            if (loanToExtend.Renewed)
+                throw new Exceptions.InvalidOperationException("Cannot extend loan, loan has already been renewed!");
+            else {
+                loanToExtend.DueDate = _today.AddMonths(1);
+                loanToExtend.Renewed = true;
+            }
+            _loanDao.Save(loanToExtend);
         }
 
         public long CountLoansByUser(Guid userId)

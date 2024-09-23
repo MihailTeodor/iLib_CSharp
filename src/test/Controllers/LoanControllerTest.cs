@@ -336,6 +336,20 @@ public void TestRegisterReturn_WhenArticleOnLoanBooked_ThenUpdatesBooking()
         act.Should().Throw<LoanDoesNotExistException>().WithMessage("Cannot extend Loan! Loan does not exist!");
     }
 
+    [Theory]
+    [InlineData(LoanState.RETURNED)]
+    [InlineData(LoanState.OVERDUE)]
+    public void TestExtendLoan_WhenLoanExistsButNotActive_ThrowsInvalidOperationException(LoanState state)
+    {
+        var mockLoanToExtend = new Mock<Loan>();
+
+        _loanDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns(mockLoanToExtend.Object);
+        mockLoanToExtend.Setup(x => x.State).Returns(state);
+        Action act = () => _loanController.ExtendLoan(Guid.NewGuid());
+
+        act.Should().Throw<iLib.src.main.Exceptions.InvalidOperationException>().WithMessage("Cannot extend loan, selected loan is not Active!");
+    }
+    
     [Fact]
     public void TestExtendLoan_WhenLoanExistsButBookedByAnotherUser_ThrowsInvalidOperationException()
     {
@@ -344,6 +358,7 @@ public void TestRegisterReturn_WhenArticleOnLoanBooked_ThenUpdatesBooking()
 
         _loanDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns(mockLoanToExtend.Object);
         mockLoanToExtend.Setup(x => x.ArticleOnLoan).Returns(mockArticle.Object);
+        mockLoanToExtend.Setup(x => x.State).Returns(LoanState.ACTIVE);
         mockArticle.Setup(x => x.State).Returns(ArticleState.ONLOANBOOKED);
 
         Action act = () => _loanController.ExtendLoan(Guid.NewGuid());
@@ -351,23 +366,46 @@ public void TestRegisterReturn_WhenArticleOnLoanBooked_ThenUpdatesBooking()
         act.Should().Throw<iLib.src.main.Exceptions.InvalidOperationException>().WithMessage("Cannot extend loan, another User has booked the Article!");
     }
 
- [Fact]
-    public void TestExtendLoan_WhenLoanExistsAndNotBookedByAnotherUser_UpdatesDueDate()
+    [Fact]
+    public void TestExtendLoan_WhenLoanAlreadyRenewed_ThrowsInvalidOperationException()
     {
         var mockLoanToExtend = new Mock<Loan>();
         var mockArticle = new Mock<Article>();
 
         _loanDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns(mockLoanToExtend.Object);
         mockLoanToExtend.Setup(x => x.ArticleOnLoan).Returns(mockArticle.Object);
+        mockLoanToExtend.Setup(x => x.Renewed).Returns(true);
+        mockLoanToExtend.Setup(x => x.State).Returns(LoanState.ACTIVE);
+        mockArticle.Setup(x => x.State).Returns(ArticleState.ONLOAN);
+
+        Action act = () => _loanController.ExtendLoan(Guid.NewGuid());
+
+        act.Should().Throw<iLib.src.main.Exceptions.InvalidOperationException>().WithMessage("Cannot extend loan, loan has already been renewed!");
+    }
+
+ [Fact]
+    public void TestExtendLoan_WhenLoanExistsAndNotBookedByAnotherUser_UpdatesDueDateAndSetsRenewedToTrue()
+    {
+        var mockLoanToExtend = new Mock<Loan>();
+        var mockArticle = new Mock<Article>();
+
+        _loanDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns(mockLoanToExtend.Object);
+        mockLoanToExtend.Setup(x => x.ArticleOnLoan).Returns(mockArticle.Object);
+        mockLoanToExtend.Setup(x => x.State).Returns(LoanState.ACTIVE);
         mockArticle.Setup(x => x.State).Returns(ArticleState.ONLOAN);
 
         DateTime newDueDate = DateTime.MinValue;
+        bool _renewed = false;
         mockLoanToExtend.SetupSet(x => x.DueDate = It.IsAny<DateTime>())
                         .Callback<DateTime>(date => newDueDate = date);
+
+        mockLoanToExtend.SetupSet(x => x.Renewed = It.IsAny<bool>())
+                        .Callback<bool>(renewed => _renewed = renewed);
 
         _loanController.ExtendLoan(Guid.NewGuid());
 
         newDueDate.Date.Should().Be(_today.AddMonths(1).Date);
+        _renewed.Should().BeTrue();
     }
 
 
