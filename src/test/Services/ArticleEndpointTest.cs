@@ -331,8 +331,8 @@ public class ArticleEndpointTest
         await InitializeDatabase();
 
         await QueryUtils.CreateBook(_session, Guid.NewGuid(), "Shelf 1", "Book 1", DateTime.Now.AddYears(-2), "Publisher 1", "Fiction", "Description 1", ArticleState.AVAILABLE, "Author 1", "1234567890");
-        await QueryUtils.CreateBook(_session, Guid.NewGuid(), "Shelf 2", "Book 2", DateTime.Now.AddYears(-1), "Publisher 2", "Science", "Description 2", ArticleState.BOOKED, "Author 2", "0987654321");
-        await QueryUtils.CreateBook(_session, Guid.NewGuid(), "Shelf 3", "Book 3", DateTime.Now, "Publisher 3", "History", "Description 3", ArticleState.ONLOAN, "Author 1", "1234509876");
+        await QueryUtils.CreateBook(_session, Guid.NewGuid(), "Shelf 2", "Book 2", DateTime.Now.AddYears(-1), "Publisher 2", "Science", "Description 2", ArticleState.AVAILABLE, "Author 2", "0987654321");
+        await QueryUtils.CreateBook(_session, Guid.NewGuid(), "Shelf 3", "Book 3", DateTime.Now, "Publisher 3", "History", "Description 3", ArticleState.AVAILABLE, "Author 1", "1234509876");
 
         var client = new RestClient("http://localhost:5062/ilib/v1/articlesEndpoint");
         var request = new RestRequest("", Method.Get);

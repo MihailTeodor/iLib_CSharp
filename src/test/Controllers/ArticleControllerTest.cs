@@ -544,6 +544,51 @@ public void TestGetArticleInfoExtended_WhenArticleExists_ReturnsArticleDTO(Artic
     }
 
     [Fact]
+    public void TestSearchArticles_WhenArticleIsBooked_PerformsValidateState() {
+        var mockBook = new Mock<Book>();
+        var mockBooking = new Mock<Booking>();
+
+        mockBook.Setup(x => x.State).Returns(ArticleState.BOOKED);
+        _articleDaoMock.Setup(x => x.FindArticles(null, null, null, null, null, null, null, 0, 0)).Returns([mockBook.Object]);
+        _bookingDaoMock.Setup(x => x.SearchBookings(null, mockBook.Object, 0, 1)).Returns([mockBooking.Object]);
+
+        _articleController.SearchArticles(null, null, null, null, null, null, null, null, null, null, 0, 0);
+
+        mockBooking.Verify(x => x.ValidateState(), Times.Once);
+    }
+
+    [Fact]
+    public void TestSearchArticles_WhenArticleIsOnloan_PerformsValidateState() {
+        var mockBook = new Mock<Book>();
+        var mockLoan = new Mock<Loan>();
+
+        mockBook.Setup(x => x.State).Returns(ArticleState.ONLOAN);
+        _articleDaoMock.Setup(x => x.FindArticles(null, null, null, null, null, null, null, 0, 0)).Returns([mockBook.Object]);
+        _loanDaoMock.Setup(x => x.SearchLoans(null, mockBook.Object, 0, 1)).Returns([mockLoan.Object]);
+
+        _articleController.SearchArticles(null, null, null, null, null, null, null, null, null, null, 0, 0);
+
+        mockLoan.Verify(x => x.ValidateState(), Times.Once);
+    }
+
+    [Fact]
+    public void TestSearchArticles_WhenArticleIsOnloanBooked_PerformsValidateState() {
+        var mockBook = new Mock<Book>();
+        var mockBooking = new Mock<Booking>();
+        var mockLoan = new Mock<Loan>();
+
+        mockBook.Setup(x => x.State).Returns(ArticleState.ONLOANBOOKED);
+        _articleDaoMock.Setup(x => x.FindArticles(null, null, null, null, null, null, null, 0, 0)).Returns([mockBook.Object]);
+        _bookingDaoMock.Setup(x => x.SearchBookings(null, mockBook.Object, 0, 1)).Returns([mockBooking.Object]);
+        _loanDaoMock.Setup(x => x.SearchLoans(null, mockBook.Object, 0, 1)).Returns([mockLoan.Object]);
+
+        _articleController.SearchArticles(null, null, null, null, null, null, null, null, null, null, 0, 0);
+
+        mockBooking.Verify(x => x.ValidateState(), Times.Once);
+        mockLoan.Verify(x => x.ValidateState(), Times.Once);
+    }
+
+    [Fact]
     public void TestCountArticles_WhenIsbnNotNull_PerformsCountBooksByIsbn()
     {
         _articleController.CountArticles("1234567890", null, null, null, null, null, null, null, null, null);

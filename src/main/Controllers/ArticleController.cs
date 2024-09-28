@@ -107,6 +107,17 @@ namespace iLib.src.main.Controllers
             if (!retrievedArticles.Any())
                 throw new SearchHasGivenNoResultsException("The search has given 0 results!");
 
+            foreach (Article article in retrievedArticles) {
+                ArticleState articleState = article.State;
+                if(articleState == ArticleState.BOOKED) {
+                    _bookingDao.SearchBookings(null, article, 0, 1).First().ValidateState();
+                }else if(articleState == ArticleState.ONLOAN) {
+                    _loanDao.SearchLoans(null, article, 0, 1).First().ValidateState();
+                }else if(articleState == ArticleState.ONLOANBOOKED) {
+                    _bookingDao.SearchBookings(null, article, 0, 1).First().ValidateState();
+                    _loanDao.SearchLoans(null, article, 0, 1).First().ValidateState();
+                }
+            }
             return retrievedArticles;
         }
 
