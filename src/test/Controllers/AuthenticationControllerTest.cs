@@ -5,11 +5,11 @@ using iLib.src.main.Utils;
 using iLib.src.main.Model;
 
 [Collection("Endpoints Tests")]
-public class AuthenticationEndpointTests
+public class AuthenticationControllerTests
 {
     private readonly NHibernate.ISession _session;
 
-    public AuthenticationEndpointTests()
+    public AuthenticationControllerTests()
     {
         _session = NHibernateHelper.OpenSession();
     }

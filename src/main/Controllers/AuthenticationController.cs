@@ -1,6 +1,6 @@
 using iLib.src.main.DTO;
 using iLib.src.main.Exceptions;
-using iLib.src.main.IControllers;
+using iLib.src.main.IServices;
 using iLib.src.main.rest;
 using Microsoft.AspNetCore.Mvc;
 
@@ -8,9 +8,9 @@ namespace iLib.src.main.Services
 {
     [Route("auth")]
     [ApiController]
-    public class AuthenticationEndpoint(IUserController userController, ILogger<AuthenticationEndpoint> logger) : ControllerBase
+    public class AuthenticationEndpoint(IUserService userService, ILogger<AuthenticationEndpoint> logger) : ControllerBase
     {
-        private readonly IUserController _userController = userController;
+        private readonly IUserService _userService = userService;
         private readonly ILogger<AuthenticationEndpoint> _logger = logger;
 
         [HttpPost("login")]
@@ -20,7 +20,7 @@ namespace iLib.src.main.Services
         {
             try
             {
-                var user = _userController.SearchUsers(credentials.Email, null, null, null, 0, 1).FirstOrDefault();
+                var user = _userService.SearchUsers(credentials.Email, null, null, null, 0, 1).FirstOrDefault();
                 if (user == null || user.Email == null || !BCrypt.Net.BCrypt.Verify(credentials.Password, user.Password))
                 {
                     return Unauthorized(new { error = "Credentials are invalid." });

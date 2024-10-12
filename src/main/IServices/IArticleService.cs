@@ -1,9 +1,9 @@
 using iLib.src.main.DTO;
 using iLib.src.main.Model;
 
-namespace iLib.src.main.IControllers
+namespace iLib.src.main.IServices
 {
-    public interface IArticleController
+    public interface IArticleService
     {
         Guid AddArticle(ArticleDTO articleDTO);
         void UpdateArticle(Guid id, ArticleDTO articleDTO);

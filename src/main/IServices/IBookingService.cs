@@ -1,9 +1,9 @@
 using iLib.src.main.DTO;
 using iLib.src.main.Model;
 
-namespace iLib.src.main.IControllers
+namespace iLib.src.main.IServices
 {
-    public interface IBookingController
+    public interface IBookingService
     {
         Guid RegisterBooking(Guid userId, Guid articleId);
         BookingDTO GetBookingInfo(Guid bookingId);

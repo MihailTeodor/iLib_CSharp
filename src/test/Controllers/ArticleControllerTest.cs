@@ -1,690 +1,516 @@
-using Moq;
-using Xunit;
-using FluentAssertions;
-using iLib.src.main.Controllers;
-using iLib.src.main.DAO;
 using iLib.src.main.DTO;
-using iLib.src.main.Exceptions;
 using iLib.src.main.Model;
-using iLib.src.main.IDAO;
+using iLib.src.main.Utils;
+using Newtonsoft.Json.Linq;
+using RestSharp;
+using Xunit;
 
+[Collection("Endpoints Tests")]
 public class ArticleControllerTest
 {
-    private readonly ArticleController _articleController;
-    private readonly Mock<IArticleDao> _articleDaoMock;
-    private readonly Mock<IBookDao> _bookDaoMock;
-    private readonly Mock<IMagazineDao> _magazineDaoMock;
-    private readonly Mock<IMovieDVDDao> _movieDVDDaoMock;
-    private readonly Mock<IBookingDao> _bookingDaoMock;
-    private readonly Mock<ILoanDao> _loanDaoMock;
-    private readonly Mock<NHibernate.ISession> _sessionMock;
-
+    private readonly NHibernate.ISession _session;
+    private User? adminUser;
+    private User? citizenUser;
+    private string? adminToken;
+    private string? citizenToken;
 
     public ArticleControllerTest()
     {
-        _sessionMock = new Mock<NHibernate.ISession>();
+        _session = NHibernateHelper.OpenSession();
+    }
 
-        _articleDaoMock = new Mock<IArticleDao>();
-        _bookDaoMock = new Mock<IBookDao>();
-        _magazineDaoMock = new Mock<IMagazineDao>();
-        _movieDVDDaoMock = new Mock<IMovieDVDDao>();
-        _bookingDaoMock = new Mock<IBookingDao>();
-        _loanDaoMock = new Mock<ILoanDao>();
+    private async Task InitializeDatabase()
+    {
+        await QueryUtils.TruncateAllTables(_session);
 
-        _articleController = new ArticleController(
-            _articleDaoMock.Object,
-            _bookDaoMock.Object,
-            _magazineDaoMock.Object,
-            _movieDVDDaoMock.Object,
-            _bookingDaoMock.Object,
-            _loanDaoMock.Object
-        );
-    
+        adminUser = await QueryUtils.CreateUser(_session, Guid.NewGuid(), "admin@example.com", "admin password", "adminName", "adminSurname", "adminAddress", "adminTelephoneNumber", UserRole.ADMINISTRATOR);
+        adminToken = await AuthHelper.GetAuthToken("admin@example.com", "admin password");
+
+        citizenUser = await QueryUtils.CreateUser(_session, Guid.NewGuid(), "user@Email.com", "user password", "name", "surname", "address", "123432", UserRole.CITIZEN);
+        citizenToken = await AuthHelper.GetAuthToken("user@Email.com", "user password");
     }
 
     [Fact]
-    public void TestAddArticle()
+    public async Task TestCreateArticle_Success()
     {
-        var articleDTO = new ArticleDTO
-        {
-            Type = ArticleType.BOOK,
-            Isbn = "isbn",
-            Author = "author",
-            Description = "description",
-            Genre = "genre",
-            Location = "location",
-            Publisher = "publisher",
-            Title = "title",
-            YearEdition = DateTime.Now
-        };
+        await InitializeDatabase();
 
-        Article? savedArticle = null;
+        var articleDTO = CreateArticleDTO(null, ArticleType.BOOK, "Shelf 1", "A Great Book", DateTime.Now.AddYears(-1), "Publisher", "Fiction", "Description", ArticleState.AVAILABLE, "Author", "1234567890", null, null, null, null, null, null);
 
-        _articleDaoMock.Setup(x => x.Save(It.IsAny<Article>()))
-            .Callback<Article>(article => savedArticle = article);
+        var client = new RestClient("http://localhost:5062/ilib/v1/articlesEndpoint");
+        var request = new RestRequest("");
+        request.AddHeader("Authorization", "Bearer " + adminToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddJsonBody(articleDTO);
 
-        _articleController.AddArticle(articleDTO);
+        var response = await client.ExecutePostAsync(request);
+        var content = JObject.Parse(response.Content!);
 
-        _articleDaoMock.Verify(x => x.Save(It.IsAny<Article>()), Times.Once);
-
-        savedArticle.Should().NotBeNull();
-        savedArticle.Should().BeOfType<Book>();
-        ((Book)savedArticle!).Isbn.Should().Be(articleDTO.Isbn);
-        ((Book)savedArticle).Author.Should().Be(articleDTO.Author);
-        savedArticle.Description.Should().Be(articleDTO.Description);
-        savedArticle.Genre.Should().Be(articleDTO.Genre);
-        savedArticle.Location.Should().Be(articleDTO.Location);
-        savedArticle.Publisher.Should().Be(articleDTO.Publisher);
-        savedArticle.Title.Should().Be(articleDTO.Title);
-        savedArticle.YearEdition.Should().Be(articleDTO.YearEdition);
-    }
-
-    [Fact]
-    public void TestUpdateArticle_WhenArticleToUpdateDoesNotExist_ThrowsArticleDoesNotExistException()
-    {
-        var articleDTO = new ArticleDTO();
-        _articleDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns((Article)null!);
-
-        Action act = () => _articleController.UpdateArticle(Guid.NewGuid(), articleDTO);
-
-        act.Should().Throw<ArticleDoesNotExistException>().WithMessage("Article does not exist!");
-    }
-
-    [Fact]
-    public void TestUpdateArticle_Book_TypeMismatch_ThrowsIllegalArgumentException()
-    {
-        var articleDTO = new ArticleDTO { Type = ArticleType.BOOK };
-        _articleDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns(new Magazine());
-
-        Action act = () => _articleController.UpdateArticle(Guid.NewGuid(), articleDTO);
-
-        act.Should().Throw<ArgumentException>().WithMessage("Cannot change type of Article");
-    }
-
-    [Fact]
-    public void TestUpdateArticle_Book_WhenIsbnIsNull_ThrowsIllegalArgumentException()
-    {
-        var articleDTO = new ArticleDTO { Type = ArticleType.BOOK };
-        _articleDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns(new Book());
-
-        Action act = () => _articleController.UpdateArticle(Guid.NewGuid(), articleDTO);
-
-        act.Should().Throw<ArgumentException>().WithMessage("Article identifier is required");
-    }
-
-    [Fact]
-    public void TestUpdateArticle_Book_WhenAuthorIsNull_ThrowsIllegalArgumentException()
-    {
-        var articleDTO = new ArticleDTO
-        {
-            Type = ArticleType.BOOK,
-            Isbn = "isbn"
-        };
-        _articleDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns(new Book());
-
-        Action act = () => _articleController.UpdateArticle(Guid.NewGuid(), articleDTO);
-
-        act.Should().Throw<ArgumentException>().WithMessage("Author is required!");
-    }
-
-    [Fact]
-    public void TestUpdateArticle_Magazine_TypeMismatch_ThrowsIllegalArgumentException()
-    {
-        var articleDTO = new ArticleDTO { Type = ArticleType.MAGAZINE };
-        _articleDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns(new Book());
-
-        Action act = () => _articleController.UpdateArticle(Guid.NewGuid(), articleDTO);
-
-        act.Should().Throw<ArgumentException>().WithMessage("Cannot change type of Article");
-    }
-
-    [Fact]
-    public void TestUpdateArticle_Magazine_WhenIssnIsNull_ThrowsIllegalArgumentException()
-    {
-        var articleDTO = new ArticleDTO { Type = ArticleType.MAGAZINE };
-        _articleDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns(new Magazine());
-
-        Action act = () => _articleController.UpdateArticle(Guid.NewGuid(), articleDTO);
-
-        act.Should().Throw<ArgumentException>().WithMessage("Article identifier is required");
-    }
-
-    [Fact]
-    public void TestUpdateArticle_Magazine_WhenIssueNumberIsNull_ThrowsIllegalArgumentException()
-    {
-        var articleDTO = new ArticleDTO
-        {
-            Type = ArticleType.MAGAZINE,
-            Issn = "issn"
-        };
-        _articleDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns(new Magazine());
-
-        Action act = () => _articleController.UpdateArticle(Guid.NewGuid(), articleDTO);
-
-        act.Should().Throw<ArgumentException>().WithMessage("Issue number is required!");
-    }
-
-    [Fact]
-    public void TestUpdateArticle_MovieDVD_TypeMismatch_ThrowsIllegalArgumentException()
-    {
-        var articleDTO = new ArticleDTO { Type = ArticleType.MOVIEDVD };
-        _articleDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns(new Magazine());
-
-        Action act = () => _articleController.UpdateArticle(Guid.NewGuid(), articleDTO);
-
-        act.Should().Throw<ArgumentException>().WithMessage("Cannot change type of Article");
-    }
-
-    [Fact]
-    public void TestUpdateArticle_MovieDVD_WhenIssnIsNull_ThrowsIllegalArgumentException()
-    {
-        var articleDTO = new ArticleDTO { Type = ArticleType.MOVIEDVD };
-        _articleDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns(new MovieDVD());
-
-        Action act = () => _articleController.UpdateArticle(Guid.NewGuid(), articleDTO);
-
-        act.Should().Throw<ArgumentException>().WithMessage("Article identifier is required");
-    }
-
-    [Fact]
-    public void TestUpdateArticle_MovieDVD_WhenIssueNumberIsNull_ThrowsIllegalArgumentException()
-    {
-        var articleDTO = new ArticleDTO
-        {
-            Type = ArticleType.MOVIEDVD,
-            Isan = "isan"
-        };
-        _articleDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns(new MovieDVD());
-
-        Action act = () => _articleController.UpdateArticle(Guid.NewGuid(), articleDTO);
-
-        act.Should().Throw<ArgumentException>().WithMessage("Director is required!");
-    }
-
-    [Fact]
-    public void TestUpdateArticle_WhenArticleToUpdateExistsAndIsbnNotNull_UpdatesBookAttributes()
-    {
-        var articleDTO = new ArticleDTO
-        {
-            Type = ArticleType.BOOK,
-            Isbn = "isbn",
-            Author = "author"
-        };
-
-        var mockArticle = new Mock<Book>();
-        _articleDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns(mockArticle.Object);
-
-        _articleController.UpdateArticle(Guid.NewGuid(), articleDTO);
-
-        mockArticle.VerifySet(x => x.Isbn = articleDTO.Isbn);
-        mockArticle.VerifySet(x => x.Author = articleDTO.Author);
-    }
-
-    [Fact]
-    public void TestUpdateArticle_WhenArticleToUpdateExistsAndIssnNotNull_UpdatesMagazineAttributes()
-    {
-        var articleDTO = new ArticleDTO
-        {
-            Type = ArticleType.MAGAZINE,
-            Issn = "issn",
-            IssueNumber = 1
-        };
-
-        var mockArticle = new Mock<Magazine>();
-        _articleDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns(mockArticle.Object);
-
-        _articleController.UpdateArticle(Guid.NewGuid(), articleDTO);
-
-        mockArticle.VerifySet(x => x.Issn = articleDTO.Issn);
-        mockArticle.VerifySet(x => x.IssueNumber = articleDTO.IssueNumber.Value);
-    }
-
-    [Fact]
-    public void TestUpdateArticle_WhenArticleToUpdateExistsAndIsanNotNull_UpdatesMovieDVDAttributes()
-    {
-        var articleDTO = new ArticleDTO
-        {
-            Type = ArticleType.MOVIEDVD,
-            Isan = "isan",
-            Director = "director"
-        };
-
-        var mockArticle = new Mock<MovieDVD>();
-        _articleDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns(mockArticle.Object);
-
-        _articleController.UpdateArticle(Guid.NewGuid(), articleDTO);
-
-        mockArticle.VerifySet(x => x.Isan = articleDTO.Isan);
-        mockArticle.VerifySet(x => x.Director = articleDTO.Director);
-    }
-
-    public static IEnumerable<object[]> TestUpdateArticleArgumentsProvider()
-    {
-        yield return new object[] { ArticleState.UNAVAILABLE, ArticleState.AVAILABLE, true };
-        yield return new object[] { ArticleState.AVAILABLE, ArticleState.UNAVAILABLE, true };
-        yield return new object[] { ArticleState.UNAVAILABLE, ArticleState.UNAVAILABLE, true };
-        yield return new object[] { ArticleState.UNAVAILABLE, ArticleState.ONLOAN, false };
-        yield return new object[] { ArticleState.UNAVAILABLE, ArticleState.ONLOANBOOKED, false };
-        yield return new object[] { ArticleState.UNAVAILABLE, ArticleState.BOOKED, false };
-        yield return new object[] { ArticleState.UNAVAILABLE, null!, false };
-        yield return new object[] { ArticleState.AVAILABLE, ArticleState.AVAILABLE, true };
-        yield return new object[] { ArticleState.AVAILABLE, ArticleState.ONLOAN, false };
-        yield return new object[] { ArticleState.AVAILABLE, ArticleState.ONLOANBOOKED, false };
-        yield return new object[] { ArticleState.AVAILABLE, ArticleState.BOOKED, false };
-        yield return new object[] { ArticleState.AVAILABLE, null!, false };
-        yield return new object[] { ArticleState.ONLOAN, ArticleState.ONLOAN, true };
-        yield return new object[] { ArticleState.ONLOAN, ArticleState.UNAVAILABLE, false };
-        yield return new object[] { ArticleState.ONLOAN, ArticleState.AVAILABLE, false };
-        yield return new object[] { ArticleState.ONLOAN, ArticleState.BOOKED, false };
-        yield return new object[] { ArticleState.ONLOAN, ArticleState.ONLOANBOOKED, false };
-        yield return new object[] { ArticleState.ONLOAN, null!, false };
-        yield return new object[] { ArticleState.ONLOANBOOKED, ArticleState.ONLOANBOOKED, true };
-        yield return new object[] { ArticleState.ONLOANBOOKED, ArticleState.UNAVAILABLE, false };
-        yield return new object[] { ArticleState.ONLOANBOOKED, ArticleState.AVAILABLE, false };
-        yield return new object[] { ArticleState.ONLOANBOOKED, ArticleState.ONLOAN, false };
-        yield return new object[] { ArticleState.ONLOANBOOKED, ArticleState.BOOKED, false };
-        yield return new object[] { ArticleState.ONLOANBOOKED, null!, false };
-        yield return new object[] { ArticleState.BOOKED, ArticleState.BOOKED, true };
-        yield return new object[] { ArticleState.BOOKED, ArticleState.ONLOAN, false };
-        yield return new object[] { ArticleState.BOOKED, ArticleState.ONLOANBOOKED, false };
-        yield return new object[] { ArticleState.BOOKED, ArticleState.AVAILABLE, false };
-        yield return new object[] { ArticleState.BOOKED, ArticleState.UNAVAILABLE, false };
-        yield return new object[] { ArticleState.BOOKED, null!, false };
-    }
-    
-[Theory]
-[MemberData(nameof(TestUpdateArticleArgumentsProvider))]
-public void TestUpdateArticle_StateTransitions_HandledCorrectly(ArticleState initialState, ArticleState? newState, bool shouldSucceed)
-{
-    var articleDTO = new ArticleDTO { State = newState, Type = ArticleType.BOOK, Isbn = "isbn", Author = "author" };
-
-    var mockArticle = new Mock<Book>();
-    mockArticle.SetupAllProperties();
-
-    ArticleState privateState = initialState;
-    mockArticle.Setup(x => x.State).Returns(() => privateState);
-    mockArticle.SetupSet(x => x.State = It.IsAny<ArticleState>()).Callback<ArticleState>(value => privateState = value);
-
-    _articleDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns(mockArticle.Object);
-    
-    try
-    {
-        _articleController.UpdateArticle(Guid.NewGuid(), articleDTO);
-
-        if (!shouldSucceed && newState != null)
-        {
-            Assert.Fail("Expected InvalidStateTransitionException but none was thrown!");
-        }
-    }
-    catch (InvalidStateTransitionException ex)
-    {
-        if (shouldSucceed)
-        {
-            Assert.Fail("Did not expect InvalidStateTransitionException to be thrown!");
-        }
-        Assert.IsType<InvalidStateTransitionException>(ex);
-        Assert.Equal("Cannot change state to inserted value!", ex.Message);
-    }
-
-    if (shouldSucceed)
-    {
-        if (initialState != newState)
-        {
-            mockArticle.VerifySet(x => x.State = It.IsAny<ArticleState>(), Times.Exactly(1));
-            mockArticle.Object.State.Should().Be(newState);
-        }
-        _articleDaoMock.Verify(x => x.Save(mockArticle.Object), Times.Once);
-    }
-    else
-    {
-        mockArticle.VerifySet(x => x.State = It.IsAny<ArticleState>(), Times.Never);
-    }
-}
-
-    [Fact]
-    public void TestGetArticleInfoExtended_WhenArticleDoesNotExist_ThrowsArticleDoesNotExistException()
-    {
-        _articleDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns((Article)null!);
-
-        Action act = () => _articleController.GetArticleInfoExtended(Guid.NewGuid());
-
-        act.Should().Throw<ArticleDoesNotExistException>().WithMessage("Article does not exist!");
-    }
-
-    public static IEnumerable<object[]> TestGetArticleInfoArgumentsProvider()
-    {
-        yield return new object[] { ArticleState.BOOKED };
-        yield return new object[] { ArticleState.ONLOAN };
-        yield return new object[] { ArticleState.ONLOANBOOKED };
-        yield return new object[] { ArticleState.AVAILABLE };
-        yield return new object[] { ArticleState.UNAVAILABLE };
+        Assert.Equal(201, (int)response.StatusCode);
+        Assert.True(content.ContainsKey("articleId"));
     }
 
     [Theory]
-    [MemberData(nameof(TestGetArticleInfoArgumentsProvider))]
-    public void TestGetArticleInfoExtended_WhenArticleExists_CallsValidateState(ArticleState state)
+    [MemberData(nameof(ProvideInvalidArticleData))]
+    public async Task TestCreateArticle_InvalidData(ArticleDTO articleDTO, string expectedErrorMessage)
     {
-        var mockArticle = new Mock<Article>();
-        var mockUser  = new Mock<User>();
-        mockArticle.Setup(x => x.Id).Returns(Guid.NewGuid());
-        mockUser.Setup(x => x.Id).Returns(Guid.NewGuid());
-        mockArticle.Setup(x => x.State).Returns(state);
-        _articleDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns(mockArticle.Object);
+        await InitializeDatabase();
 
-        Booking mockBooking = null!;
-        Loan mockLoan = null!;
+        var client = new RestClient("http://localhost:5062/ilib/v1/articlesEndpoint");
+        var request = new RestRequest("");
+        request.AddHeader("Authorization", "Bearer " + adminToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddJsonBody(articleDTO);
 
-        if (state == ArticleState.BOOKED)
-        {
-            mockBooking = new Mock<Booking>().Object;
-            mockBooking.BookedArticle = mockArticle.Object;
-            mockBooking.BookingUser = mockUser.Object;
-            _bookingDaoMock.Setup(x => x.SearchBookings(null, mockArticle.Object, 0, 1)).Returns([mockBooking]);
-        }
-        else if (state == ArticleState.ONLOAN)
-        {
-            mockLoan = new Mock<Loan>().Object;
-            mockLoan.ArticleOnLoan = mockArticle.Object;
-            mockLoan.LoaningUser = mockUser.Object;
-            _loanDaoMock.Setup(x => x.SearchLoans(null, mockArticle.Object, 0, 1)).Returns([mockLoan]);
-        }
-        else if (state == ArticleState.ONLOANBOOKED)
-        {
-            mockBooking = new Mock<Booking>().Object;
-            mockBooking.BookedArticle = mockArticle.Object;
-            mockBooking.BookingUser = mockUser.Object;
-            _bookingDaoMock.Setup(x => x.SearchBookings(null, mockArticle.Object, 0, 1)).Returns([mockBooking]);
+        var response = await client.ExecutePostAsync(request);
+        var content = response.Content;
 
-            mockLoan = new Mock<Loan>().Object;
-            mockLoan.ArticleOnLoan = mockArticle.Object;
-            mockLoan.LoaningUser = mockUser.Object;
-            _loanDaoMock.Setup(x => x.SearchLoans(null, mockArticle.Object, 0, 1)).Returns([mockLoan]);
-        }
+        Assert.Equal(400, (int)response.StatusCode);
+        Assert.Contains(expectedErrorMessage, content);
+    }
 
-        _articleController.GetArticleInfoExtended(Guid.NewGuid());
+    public static IEnumerable<object[]> ProvideInvalidArticleData()
+    {
+        yield return new object[] { CreateArticleDTO(null, null, "Shelf 1", "A Great Book", DateTime.Now.AddYears(-1), "Publisher", "Fiction", "Description", ArticleState.AVAILABLE, "Author", "1234567890", null, null, null, null, null, null), "Type is required" };
+        yield return new object[] { CreateArticleDTO(null, ArticleType.BOOK, null, "A Great Book", DateTime.Now.AddYears(-1), "Publisher", "Fiction", "Description", ArticleState.AVAILABLE, "Author", "1234567890", null, null, null, null, null, null), "Location is required" };
+        yield return new object[] { CreateArticleDTO(null, ArticleType.BOOK, "Shelf 1", null, DateTime.Now.AddYears(-1), "Publisher", "Fiction", "Description", ArticleState.AVAILABLE, "Author", "1234567890", null, null, null, null, null, null), "Title is required" };
+        yield return new object[] { CreateArticleDTO(null, ArticleType.BOOK, "Shelf 1", "A Great Book", null, "Publisher", "Fiction", "Description", ArticleState.AVAILABLE, "Author", "1234567890", null, null, null, null, null, null), "Year of edition is required" };
+        yield return new object[] { CreateArticleDTO(null, ArticleType.BOOK, "Shelf 1", "A Great Book", DateTime.Now.AddYears(1), "Publisher", "Fiction", "Description", ArticleState.AVAILABLE, "Author", "1234567890", null, null, null, null, null, null), "Year of edition cannot be in the future" };
+        yield return new object[] { CreateArticleDTO(null, ArticleType.BOOK, "Shelf 1", "A Great Book", DateTime.Now.AddYears(-1), null, "Fiction", "Description", ArticleState.AVAILABLE, "Author", "1234567890", null, null, null, null, null, null), "Publisher is required" };
+        yield return new object[] { CreateArticleDTO(null, ArticleType.BOOK, "Shelf 1", "A Great Book", DateTime.Now.AddYears(-1), "Publisher", null, "Description", ArticleState.AVAILABLE, "Author", "1234567890", null, null, null, null, null, null), "Genre is required" };
+    }
 
-        if (state == ArticleState.BOOKED)
-        {
-            _bookingDaoMock.Verify(x => x.SearchBookings(null, mockArticle.Object, 0, 1), Times.Once);
-            Mock.Get(mockBooking).Verify(x => x.ValidateState(), Times.Once);
-        }
-        else if (state == ArticleState.ONLOAN)
-        {
-            _loanDaoMock.Verify(x => x.SearchLoans(null, mockArticle.Object, 0, 1), Times.Once);
-            Mock.Get(mockLoan).Verify(x => x.ValidateState(), Times.Once);
-        }
-        else if (state == ArticleState.ONLOANBOOKED)
-        {
-            _bookingDaoMock.Verify(x => x.SearchBookings(null, mockArticle.Object, 0, 1), Times.Once);
-            Mock.Get(mockBooking).Verify(x => x.ValidateState(), Times.Once);
+    [Fact]
+    public async Task TestCreateArticle_Unauthorized()
+    {
+        await InitializeDatabase();
 
-            _loanDaoMock.Verify(x => x.SearchLoans(null, mockArticle.Object, 0, 1), Times.Once);
-            Mock.Get(mockLoan).Verify(x => x.ValidateState(), Times.Once);
-        }
+        var articleDTO = CreateArticleDTO(null, ArticleType.BOOK, "Shelf 1", "A Great Book", DateTime.Now.AddYears(-1), "Publisher", "Fiction", "Description", ArticleState.AVAILABLE, "Author", "1234567890", null, null, null, null, null, null);
+
+        var client = new RestClient("http://localhost:5062/ilib/v1/articlesEndpoint");
+        var request = new RestRequest("");
+        request.AddHeader("Authorization", "Bearer " + citizenToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddJsonBody(articleDTO);
+
+        var response = await client.ExecutePostAsync(request);
+
+        Assert.Equal(403, (int)response.StatusCode);
+    }
+
+    [Fact]
+    public async Task TestUpdateArticle_Success()
+    {
+        await InitializeDatabase();
+
+        var article = await QueryUtils.CreateBook(_session, Guid.NewGuid(), "upstairs", "cujo", DateTime.Now, "publisher", "horror", "a nice book", ArticleState.BOOKED, "King", "isbn");
+        var articleDTO = CreateArticleDTO(article.Id, ArticleType.BOOK, "Shelf 1", "Updated Book", DateTime.Now, "Updated Publisher", "Updated Genre", "Updated Description", ArticleState.BOOKED, "Updated Author", "1234567890", null, null, null, null, null, null);
+
+        var client = new RestClient("http://localhost:5062/ilib/v1/articlesEndpoint");
+        var request = new RestRequest("/{articleId}");
+        request.AddHeader("Authorization", "Bearer " + adminToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddParameter("articleId", article.Id, ParameterType.UrlSegment);
+        request.AddJsonBody(articleDTO);
+
+        var response = await client.ExecutePutAsync(request);
+        var content = JObject.Parse(response.Content!);
+
+        Assert.Equal(200, (int)response.StatusCode);
+        Assert.Equal("Article updated successfully.", content["message"]!.ToString());
+    }
+
+    [Fact]
+    public async Task TestUpdateArticle_NotFound()
+    {
+        await InitializeDatabase();
+
+        var articleDTO = CreateArticleDTO(null, ArticleType.BOOK, "Shelf 1", "Updated Book", DateTime.Now, "Updated Publisher", "Updated Genre", "Updated Description", ArticleState.AVAILABLE, "Updated Author", "1234567890", null, null, null, null, null, null);
+
+        var client = new RestClient("http://localhost:5062/ilib/v1/articlesEndpoint");
+        var request = new RestRequest("/{articleId}", Method.Put);
+        request.AddHeader("Authorization", "Bearer " + adminToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddParameter("articleId", Guid.NewGuid(), ParameterType.UrlSegment);
+        request.AddJsonBody(articleDTO);
+
+        var response = await client.ExecuteAsync(request);
+        var content = JObject.Parse(response.Content!);
+
+        Assert.Equal(404, (int)response.StatusCode);
+        Assert.Equal("Article does not exist!", content["error"]!.ToString());
     }
 
     [Theory]
-    [InlineData(ArticleState.BOOKED)]
-    [InlineData(ArticleState.ONLOAN)]
-    [InlineData(ArticleState.ONLOANBOOKED)]
-public void TestGetArticleInfoExtended_WhenArticleExists_ReturnsArticleDTO(ArticleState state)
-{
-    var mockArticle = new Mock<Article>();
-    var mockBooking = new Mock<Booking>();
-    var mockLoan = new Mock<Loan>();
-    var mockUser = new Mock<User>();
-    var today = DateTime.Now;
-
-    mockUser.Setup(x => x.Id).Returns(Guid.NewGuid());
-
-    mockArticle.Setup(x => x.Id).Returns(Guid.NewGuid());
-    mockArticle.Setup(x => x.Title).Returns("Cujo");
-    mockArticle.Setup(x => x.Location).Returns("upstairs");
-    mockArticle.Setup(x => x.YearEdition).Returns(today.AddYears(-1));
-    mockArticle.Setup(x => x.Publisher).Returns("publisher");
-    mockArticle.Setup(x => x.Genre).Returns("horror");
-    mockArticle.Setup(x => x.Description).Returns("description");
-    mockArticle.Setup(x => x.State).Returns(state);
-
-    mockBooking.Setup(x => x.BookingEndDate).Returns(today.AddDays(1));
-    mockBooking.Setup(x => x.BookedArticle).Returns(mockArticle.Object);
-    mockBooking.Setup(x => x.BookingUser).Returns(mockUser.Object);
-    _bookingDaoMock.Setup(x => x.SearchBookings(null, mockArticle.Object, 0, 1))
-                   .Returns(new List<Booking> { mockBooking.Object });
-
-    mockLoan.Setup(x => x.DueDate).Returns(today.AddDays(7));
-    mockLoan.Setup(x => x.ArticleOnLoan).Returns(mockArticle.Object);
-    mockLoan.Setup(x => x.LoaningUser).Returns(mockUser.Object);
-    _loanDaoMock.Setup(x => x.SearchLoans(null, mockArticle.Object, 0, 1))
-                .Returns(new List<Loan> { mockLoan.Object });
-
-    _articleDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns(mockArticle.Object);
-
-    var resultDTO = _articleController.GetArticleInfoExtended(Guid.NewGuid());
-
-    resultDTO.Should().NotBeNull();
-    resultDTO!.Id.Should().Be(mockArticle.Object.Id);
-    resultDTO.Title.Should().Be("Cujo");
-    resultDTO.Location.Should().Be("upstairs");
-    resultDTO.YearEdition.Should().Be(today.AddYears(-1));
-    resultDTO.Publisher.Should().Be("publisher");
-    resultDTO.Genre.Should().Be("horror");
-    resultDTO.Description.Should().Be("description");
-    resultDTO.State.Should().Be(state);
-
-    if (state == ArticleState.ONLOAN || state == ArticleState.ONLOANBOOKED)
+    [MemberData(nameof(ProvideInvalidArticleData))]
+    public async Task TestUpdateArticle_InvalidData(ArticleDTO articleDTO, string expectedErrorMessage)
     {
-        resultDTO.LoanDTO!.ArticleId.Should().Be(mockLoan.Object.ArticleOnLoan!.Id);
-        resultDTO.LoanDTO.LoaningUserId.Should().Be(mockLoan.Object.LoaningUser!.Id);
-    }
+        await InitializeDatabase();
 
-    if (state == ArticleState.BOOKED || state == ArticleState.ONLOANBOOKED)
-    {
-        resultDTO.BookingDTO!.BookedArticleId.Should().Be(mockBooking.Object.BookedArticle!.Id);
-        resultDTO.BookingDTO.BookingUserId.Should().Be(mockBooking.Object.BookingUser!.Id);
-    }
-}
+        var article = await QueryUtils.CreateBook(_session, Guid.NewGuid(), "upstairs", "cujo", DateTime.Now, "publisher", "horror", "a nice book", ArticleState.BOOKED, "King", "isbn");
 
+        var client = new RestClient("http://localhost:5062/ilib/v1/articlesEndpoint");
+        var request = new RestRequest("/{articleId}", Method.Put);
+        request.AddHeader("Authorization", "Bearer " + adminToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddParameter("articleId", article.Id, ParameterType.UrlSegment);
+        request.AddJsonBody(articleDTO);
+
+        var response = await client.ExecuteAsync(request);
+        var content = response.Content;
+
+        Assert.Equal(400, (int)response.StatusCode);
+        Assert.Contains(expectedErrorMessage, content);
+    }
 
     [Fact]
-    public void TestSearchArticles_WhenNoResults_ThrowsSearchHasGivenNoResultsException()
+    public async Task TestUpdateArticle_Unauthorized()
     {
-        _articleDaoMock.Setup(x => x.FindArticles(null, null, null, null, null, null, null, 0, 0)).Returns([]);
+        await InitializeDatabase();
 
-        Action act = () => _articleController.SearchArticles(null, null, null, null, null, null, null, null, null, null, 0, 0);
+        var article = await QueryUtils.CreateBook(_session, Guid.NewGuid(), "upstairs", "cujo", DateTime.Now, "publisher", "horror", "a nice book", ArticleState.BOOKED, "King", "isbn");
+        var articleDTO = CreateArticleDTO(article.Id, ArticleType.BOOK, "Shelf 1", "Updated Book", DateTime.Now, "Updated Publisher", "Updated Genre", "Updated Description", ArticleState.BOOKED, "Updated Author", "1234567890", null, null, null, null, null, null);
 
-        act.Should().Throw<SearchHasGivenNoResultsException>().WithMessage("The search has given 0 results!");
+        var client = new RestClient("http://localhost:5062/ilib/v1/articlesEndpoint");
+        var request = new RestRequest("/{articleId}", Method.Put);
+        request.AddHeader("Authorization", "Bearer " + citizenToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddParameter("articleId", article.Id, ParameterType.UrlSegment);
+        request.AddJsonBody(articleDTO);
+
+        var response = await client.ExecuteAsync(request);
+
+        Assert.Equal(403, (int)response.StatusCode);
     }
 
-    public static IEnumerable<object[]> TestSearchArticlesArgumentsProvider()
+    [Fact]
+    public async Task TestGetArticleInfo_Success()
     {
-        var mockArticle = new Mock<Article>().Object;
-        var mockBook = new Mock<Book>().Object;
-        var mockMagazine = new Mock<Magazine>().Object;
-        var mockMovieDVD = new Mock<MovieDVD>().Object;
+        await InitializeDatabase();
 
-        return
-        [
-            ["isbn", null!, null!, null!, null!, null!, null!, null!, 0, null!, new List<Article> { mockBook }, typeof(BookDao)],
-            [null!, "issn", null!, null!, null!, null!, null!, null!, 0, null!, new List<Article> { mockMagazine }, typeof(MagazineDao)],
-            [null!, null!, "isan", null!, null!, null!, null!, null!, 0, null!, new List<Article> { mockMovieDVD }, typeof(MovieDVDDao)],
-            [null!, null!, null!, "Title", null!, null!, null!, null!, 0, null!, new List<Article> { mockArticle }, typeof(ArticleDao)]
-        ];
+        var book = await QueryUtils.CreateBook(_session, Guid.NewGuid(), "Shelf 1", "A Great Book", DateTime.Now.AddYears(-1), "Publisher", "Fiction", "Description", ArticleState.AVAILABLE, "Author", "1234567890");
+
+        var client = new RestClient("http://localhost:5062/ilib/v1/articlesEndpoint");
+        var request = new RestRequest("/{articleId}", Method.Get);
+        request.AddHeader("Authorization", "Bearer " + adminToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddParameter("articleId", book.Id, ParameterType.UrlSegment);
+
+        var response = await client.ExecuteGetAsync(request);
+        var content = JObject.Parse(response.Content!);
+
+        Assert.Equal(200, (int)response.StatusCode);
+        Assert.Equal(book.Id.ToString(), content["id"]!.ToString());
+        Assert.Equal(book.Location, content["location"]!.ToString());
+        Assert.Equal(book.Title, content["title"]!.ToString());
+        Assert.Equal(book.Publisher, content["publisher"]!.ToString());
+        Assert.Equal(book.Genre, content["genre"]!.ToString());
+        Assert.Equal(book.Description, content["description"]!.ToString());
+        Assert.Equal(book.State.ToString(), content["state"]!.ToString());
+        Assert.Equal("BOOK", content["type"]!.ToString());
+        Assert.Equal(book.Author, content["author"]!.ToString());
+        Assert.Equal(book.Isbn, content["isbn"]!.ToString());
+
+        var yearEditionResponse = content["yearEdition"]!.ToObject<DateTime>();
+        Assert.Equal(book.YearEdition?.Date, yearEditionResponse.Date);
     }
 
-    [Theory]
-    [MemberData(nameof(TestSearchArticlesArgumentsProvider))]
-    public void TestSearchArticles_WhenSpecificIdentifier_PerformsSpecificSearch_OtherwisePerformsGeneralSearch(
-        string isbn, string issn, string isan, string title, string genre,
-        string publisher, DateTime? yearEdition, string author, int? issueNumber,
-        string director, List<Article> expectedResult, Type daoClass)
+    [Fact]
+    public async Task TestGetArticleInfo_NotFound()
     {
-        if (daoClass == typeof(BookDao))
+        await InitializeDatabase();
+
+        var client = new RestClient("http://localhost:5062/ilib/v1/articlesEndpoint");
+        var request = new RestRequest("/{articleId}", Method.Get);
+        request.AddHeader("Authorization", "Bearer " + adminToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddParameter("articleId", Guid.NewGuid(), ParameterType.UrlSegment);
+
+        var response = await client.ExecuteGetAsync(request);
+        var content = JObject.Parse(response.Content!);
+
+        Assert.Equal(404, (int)response.StatusCode);
+        Assert.Equal("Article does not exist!", content["error"]!.ToString());
+    }
+
+    [Fact]
+    public async Task TestSearchArticles_Success()
+    {
+        await InitializeDatabase();
+
+        var book1 = await QueryUtils.CreateBook(_session, Guid.NewGuid(), "Shelf 1", "Book 1", DateTime.Now.AddYears(-1), "Publisher 1", "Fiction", "Description 1", ArticleState.AVAILABLE, "Author 1", "1234567890");
+        await QueryUtils.CreateBook(_session, Guid.NewGuid(), "Shelf 2", "Book 2", DateTime.Now.AddYears(-2), "Publisher 2", "Science", "Description 2", ArticleState.BOOKED, "Author 2", "0987654321");
+
+        var client = new RestClient("http://localhost:5062/ilib/v1/articlesEndpoint");
+        var request = new RestRequest("", Method.Get);
+        request.AddHeader("Authorization", "Bearer " + adminToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddQueryParameter("title", "Book 1");
+
+        var response = await client.ExecuteGetAsync(request);
+        var content = JObject.Parse(response.Content!);
+
+        Assert.Equal(200, (int)response.StatusCode);
+        Assert.Equal(1, content["totalResults"]!.ToObject<int>());
+        Assert.Equal(1, content["totalPages"]!.ToObject<int>());
+        Assert.Equal(1, content["pageNumber"]!.ToObject<int>());
+        Assert.Equal(10, content["resultsPerPage"]!.ToObject<int>());
+
+        var article = content["items"]!.First();
+        Assert.Equal(book1.Id.ToString(), article["id"]!.ToString());
+        Assert.Equal(book1.Location, article["location"]!.ToString());
+        Assert.Equal(book1.Title, article["title"]!.ToString());
+        Assert.Equal(book1.Publisher, article["publisher"]!.ToString());
+        Assert.Equal(book1.Genre, article["genre"]!.ToString());
+        Assert.Equal(book1.Description, article["description"]!.ToString());
+        Assert.Equal(book1.State.ToString(), article["state"]!.ToString());
+        Assert.Equal(book1.Isbn, article["isbn"]!.ToString());
+
+        var yearEditionResponse = article["yearEdition"]!.ToObject<DateTime>();
+        Assert.Equal(book1.YearEdition?.Date, yearEditionResponse.Date);
+    }
+
+    [Fact]
+    public async Task TestSearchArticles_InvalidDateFormat()
+    {
+        await InitializeDatabase();
+
+        var client = new RestClient("http://localhost:5062/ilib/v1/articlesEndpoint");
+        var request = new RestRequest("", Method.Get);
+        request.AddHeader("Authorization", "Bearer " + adminToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddQueryParameter("yearEdition", "invalid-date");
+
+        var response = await client.ExecuteGetAsync(request);
+        var content = JObject.Parse(response.Content!);
+
+        Assert.Equal(400, (int)response.StatusCode);
+        Assert.Equal("Invalid date format for 'yearEdition', expected format YYYY-MM-DD.", content["error"]!.ToString());
+    }
+
+    [Fact]
+    public async Task TestSearchArticles_InvalidPaginationParameters()
+    {
+        await InitializeDatabase();
+
+        var client = new RestClient("http://localhost:5062/ilib/v1/articlesEndpoint");
+        var request = new RestRequest("", Method.Get);
+        request.AddHeader("Authorization", "Bearer " + adminToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddQueryParameter("pageNumber", "0");
+        request.AddQueryParameter("resultsPerPage", "-1");
+
+        var response = await client.ExecuteGetAsync(request);
+        var content = JObject.Parse(response.Content!);
+
+        Assert.Equal(400, (int)response.StatusCode);
+        Assert.Equal("Pagination parameters incorrect!", content["error"]!.ToString());
+    }
+
+    [Fact]
+    public async Task TestSearchArticles_NoResults()
+    {
+        await InitializeDatabase();
+
+        var client = new RestClient("http://localhost:5062/ilib/v1/articlesEndpoint");
+        var request = new RestRequest("", Method.Get);
+        request.AddHeader("Authorization", "Bearer " + adminToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddQueryParameter("title", "Nonexistent Book");
+
+        var response = await client.ExecuteGetAsync(request);
+        var content = JObject.Parse(response.Content!);
+
+        Assert.Equal(404, (int)response.StatusCode);
+        Assert.Equal("The search has given 0 results!", content["error"]!.ToString());
+    }
+
+    [Fact]
+    public async Task TestSearchArticles_MultipleResults()
+    {
+        await InitializeDatabase();
+
+        await QueryUtils.CreateBook(_session, Guid.NewGuid(), "Shelf 1", "Book 1", DateTime.Now.AddYears(-2), "Publisher 1", "Fiction", "Description 1", ArticleState.AVAILABLE, "Author 1", "1234567890");
+        await QueryUtils.CreateBook(_session, Guid.NewGuid(), "Shelf 2", "Book 2", DateTime.Now.AddYears(-1), "Publisher 2", "Science", "Description 2", ArticleState.AVAILABLE, "Author 2", "0987654321");
+        await QueryUtils.CreateBook(_session, Guid.NewGuid(), "Shelf 3", "Book 3", DateTime.Now, "Publisher 3", "History", "Description 3", ArticleState.AVAILABLE, "Author 1", "1234509876");
+
+        var client = new RestClient("http://localhost:5062/ilib/v1/articlesEndpoint");
+        var request = new RestRequest("", Method.Get);
+        request.AddHeader("Authorization", "Bearer " + adminToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddQueryParameter("author", "Author 1");
+
+        var response = await client.ExecuteGetAsync(request);
+        var content = JObject.Parse(response.Content!);
+
+        Assert.Equal(200, (int)response.StatusCode);
+        Assert.True(content.ContainsKey("items"));
+        var itemsArray = content["items"] as JArray;
+        Assert.Equal(2, itemsArray!.Count);
+
+        foreach (var articleObject in itemsArray)
         {
-            _bookDaoMock.Setup(x => x.FindBooksByIsbn(isbn)).Returns(expectedResult.Cast<Book>().ToList());
+            Assert.Equal("Author 1", articleObject["author"]!.ToString());
         }
-        else if (daoClass == typeof(MagazineDao))
+
+        Assert.Equal(1, content["pageNumber"]!.ToObject<int>());
+        Assert.Equal(10, content["resultsPerPage"]!.ToObject<int>());
+        Assert.Equal(2, content["totalResults"]!.ToObject<int>());
+        Assert.Equal(1, content["totalPages"]!.ToObject<int>());
+    }
+
+    [Fact]
+    public async Task TestSearchArticles_Pagination()
+    {
+        await InitializeDatabase();
+
+        await QueryUtils.CreateBook(_session, Guid.NewGuid(), "Shelf 1", "Book 1", DateTime.Now.AddYears(-2), "Publisher 1", "Fiction", "Description 1", ArticleState.AVAILABLE, "Author 1", "1234567890");
+        await QueryUtils.CreateBook(_session, Guid.NewGuid(), "Shelf 2", "Book 2", DateTime.Now.AddYears(-1), "Publisher 2", "Science", "Description 2", ArticleState.BOOKED, "Author 2", "0987654321");
+        await QueryUtils.CreateBook(_session, Guid.NewGuid(), "Shelf 3", "Book 3", DateTime.Now, "Publisher 3", "History", "Description 3", ArticleState.ONLOAN, "Author 1", "1234509876");
+
+        var client = new RestClient("http://localhost:5062/ilib/v1/articlesEndpoint");
+        var request = new RestRequest("", Method.Get);
+        request.AddHeader("Authorization", "Bearer " + adminToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddQueryParameter("resultsPerPage", "2");
+        request.AddQueryParameter("pageNumber", "2");
+
+        var response = await client.ExecuteGetAsync(request);
+        var content = JObject.Parse(response.Content!);
+
+        Assert.Equal(200, (int)response.StatusCode);
+        Assert.True(content.ContainsKey("items"));
+        var itemsArray = content["items"] as JArray;
+        Assert.Single(itemsArray!);
+
+        var articleObject = itemsArray!.First() as JObject;
+        Assert.Equal("Book 1", articleObject!["title"]!.ToString());
+
+        Assert.Equal(2, content["pageNumber"]!.ToObject<int>());
+        Assert.Equal(2, content["resultsPerPage"]!.ToObject<int>());
+        Assert.Equal(3, content["totalResults"]!.ToObject<int>());
+        Assert.Equal(2, content["totalPages"]!.ToObject<int>());
+    }
+
+    [Fact]
+    public async Task TestDeleteArticle_Success()
+    {
+        await InitializeDatabase();
+
+        var book = await QueryUtils.CreateBook(_session, Guid.NewGuid(), "Shelf 1", "Book 1", DateTime.Now.AddYears(-2), "Publisher 1", "Fiction", "Description 1", ArticleState.AVAILABLE, "Author 1", "1234567890");
+
+        var client = new RestClient("http://localhost:5062/ilib/v1/articlesEndpoint");
+        var request = new RestRequest("/{articleId}", Method.Delete);
+        request.AddHeader("Authorization", "Bearer " + adminToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddParameter("articleId", book.Id, ParameterType.UrlSegment);
+
+        var response = await client.ExecuteAsync(request);
+        var content = JObject.Parse(response.Content!);
+
+        Assert.Equal(200, (int)response.StatusCode);
+        Assert.Equal("Article deleted successfully.", content["message"]!.ToString());
+    }
+
+    [Fact]
+    public async Task TestDeleteArticle_Unauthorized()
+    {
+        await InitializeDatabase();
+
+        var book = await QueryUtils.CreateBook(_session, Guid.NewGuid(), "Shelf 1", "Book 1", DateTime.Now.AddYears(-2), "Publisher 1", "Fiction", "Description 1", ArticleState.AVAILABLE, "Author 1", "1234567890");
+
+        var client = new RestClient("http://localhost:5062/ilib/v1/articlesEndpoint");
+        var request = new RestRequest("/{articleId}", Method.Delete);
+        request.AddHeader("Authorization", "Bearer " + citizenToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddParameter("articleId", book.Id, ParameterType.UrlSegment);
+
+        var response = await client.ExecuteAsync(request);
+
+        Assert.Equal(403, (int)response.StatusCode);
+    }
+
+    [Fact]
+    public async Task TestDeleteArticle_NotFound()
+    {
+        await InitializeDatabase();
+
+        var client = new RestClient("http://localhost:5062/ilib/v1/articlesEndpoint");
+        var request = new RestRequest("/{articleId}", Method.Delete);
+        request.AddHeader("Authorization", "Bearer " + adminToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddParameter("articleId", Guid.NewGuid(), ParameterType.UrlSegment);
+
+        var response = await client.ExecuteAsync(request);
+        var content = JObject.Parse(response.Content!);
+
+        Assert.Equal(404, (int)response.StatusCode);
+        Assert.Equal("Cannot remove Article! Article not in catalogue!", content["error"]!.ToString());
+    }
+
+    [Fact]
+    public async Task TestDeleteArticle_InvalidOperation_OnLoan()
+    {
+        await InitializeDatabase();
+
+        var book = await QueryUtils.CreateBook(_session, Guid.NewGuid(), "Shelf 2", "Book 2", DateTime.Now, "Publisher 2", "Science", "Description 2", ArticleState.ONLOAN, "Author 2", "0987654321");
+
+        var client = new RestClient("http://localhost:5062/ilib/v1/articlesEndpoint");
+        var request = new RestRequest("/{articleId}", Method.Delete);
+        request.AddHeader("Authorization", "Bearer " + adminToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddParameter("articleId", book.Id, ParameterType.UrlSegment);
+
+        var response = await client.ExecuteAsync(request);
+        var content = JObject.Parse(response.Content!);
+
+        Assert.Equal(400, (int)response.StatusCode);
+        Assert.Equal("Cannot remove Article from catalogue! Article currently on loan!", content["error"]!.ToString());
+    }
+
+    [Fact]
+    public async Task TestDeleteArticle_BookedArticle()
+    {
+        await InitializeDatabase();
+
+        var user = await QueryUtils.CreateUser(_session, Guid.NewGuid(), "user@Email.com", "user password", "name", "surname", "address", "123432", UserRole.CITIZEN);
+        var book = await QueryUtils.CreateBook(_session, Guid.NewGuid(), "Shelf 3", "Book 3", DateTime.Now, "Publisher 3", "History", "Description 3", ArticleState.BOOKED, "Author 3", "1234509876");
+        await QueryUtils.CreateBooking(_session, Guid.NewGuid(), DateTime.Now, DateTime.Now.AddDays(3), BookingState.ACTIVE, book, user);
+
+        var client = new RestClient("http://localhost:5062/ilib/v1/articlesEndpoint");
+        var request = new RestRequest("/{articleId}", Method.Delete);
+        request.AddHeader("Authorization", "Bearer " + adminToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddParameter("articleId", book.Id, ParameterType.UrlSegment);
+
+        var response = await client.ExecuteAsync(request);
+        var content = JObject.Parse(response.Content!);
+
+        Assert.Equal(200, (int)response.StatusCode);
+        Assert.Equal("Article deleted successfully.", content["message"]!.ToString());
+    }
+
+    public static ArticleDTO CreateArticleDTO(Guid? id, ArticleType? type, string? location, string? title, DateTime? yearEdition, string? publisher, string? genre, string? description, ArticleState? state, string? author, string? isbn, int? issueNumber, string? issn, string? director, string? isan, LoanDTO? loanDTO, BookingDTO? bookingDTO)
+    {
+        return new ArticleDTO
         {
-            _magazineDaoMock.Setup(x => x.FindMagazinesByIssn(issn)).Returns(expectedResult.Cast<Magazine>().ToList());
-        }
-        else if (daoClass == typeof(MovieDVDDao))
-        {
-            _movieDVDDaoMock.Setup(x => x.FindMoviesByIsan(isan)).Returns(expectedResult.Cast<MovieDVD>().ToList());
-        }
-        else if (daoClass == typeof(ArticleDao))
-        {
-            _articleDaoMock.Setup(x => x.FindArticles(title, genre, publisher, yearEdition, author, issueNumber, director, 0, 0))
-                .Returns(expectedResult);
-        }
-
-        var result = _articleController.SearchArticles(isbn, issn, isan, title, genre, publisher, yearEdition, author, issueNumber, director, 0, 0);
-
-        result.Should().NotBeEmpty();
-        result.Should().BeEquivalentTo(expectedResult);
+            Id = id ?? Guid.NewGuid(),
+            Type = type,
+            Location = location,
+            Title = title,
+            YearEdition = yearEdition,
+            Publisher = publisher,
+            Genre = genre,
+            Description = description,
+            State = state,
+            Author = author,
+            Isbn = isbn,
+            IssueNumber = issueNumber,
+            Issn = issn,
+            Director = director,
+            Isan = isan,
+            LoanDTO = loanDTO,
+            BookingDTO = bookingDTO
+        };
     }
-
-    [Fact]
-    public void TestSearchArticles_WhenArticleIsBooked_PerformsValidateState() {
-        var mockBook = new Mock<Book>();
-        var mockBooking = new Mock<Booking>();
-
-        mockBook.Setup(x => x.State).Returns(ArticleState.BOOKED);
-        _articleDaoMock.Setup(x => x.FindArticles(null, null, null, null, null, null, null, 0, 0)).Returns([mockBook.Object]);
-        _bookingDaoMock.Setup(x => x.SearchBookings(null, mockBook.Object, 0, 1)).Returns([mockBooking.Object]);
-
-        _articleController.SearchArticles(null, null, null, null, null, null, null, null, null, null, 0, 0);
-
-        mockBooking.Verify(x => x.ValidateState(), Times.Once);
-    }
-
-    [Fact]
-    public void TestSearchArticles_WhenArticleIsOnloan_PerformsValidateState() {
-        var mockBook = new Mock<Book>();
-        var mockLoan = new Mock<Loan>();
-
-        mockBook.Setup(x => x.State).Returns(ArticleState.ONLOAN);
-        _articleDaoMock.Setup(x => x.FindArticles(null, null, null, null, null, null, null, 0, 0)).Returns([mockBook.Object]);
-        _loanDaoMock.Setup(x => x.SearchLoans(null, mockBook.Object, 0, 1)).Returns([mockLoan.Object]);
-
-        _articleController.SearchArticles(null, null, null, null, null, null, null, null, null, null, 0, 0);
-
-        mockLoan.Verify(x => x.ValidateState(), Times.Once);
-    }
-
-    [Fact]
-    public void TestSearchArticles_WhenArticleIsOnloanBooked_PerformsValidateState() {
-        var mockBook = new Mock<Book>();
-        var mockBooking = new Mock<Booking>();
-        var mockLoan = new Mock<Loan>();
-
-        mockBook.Setup(x => x.State).Returns(ArticleState.ONLOANBOOKED);
-        _articleDaoMock.Setup(x => x.FindArticles(null, null, null, null, null, null, null, 0, 0)).Returns([mockBook.Object]);
-        _bookingDaoMock.Setup(x => x.SearchBookings(null, mockBook.Object, 0, 1)).Returns([mockBooking.Object]);
-        _loanDaoMock.Setup(x => x.SearchLoans(null, mockBook.Object, 0, 1)).Returns([mockLoan.Object]);
-
-        _articleController.SearchArticles(null, null, null, null, null, null, null, null, null, null, 0, 0);
-
-        mockBooking.Verify(x => x.ValidateState(), Times.Once);
-        mockLoan.Verify(x => x.ValidateState(), Times.Once);
-    }
-
-    [Fact]
-    public void TestCountArticles_WhenIsbnNotNull_PerformsCountBooksByIsbn()
-    {
-        _articleController.CountArticles("1234567890", null, null, null, null, null, null, null, null, null);
-
-        _bookDaoMock.Verify(x => x.CountBooksByIsbn("1234567890"), Times.Once);
-    }
-
-    [Fact]
-    public void TestCountArticles_WhenIssnNotNull_PerformsCountMagazinesByIssn()
-    {
-        _articleController.CountArticles(null, "9876543210", null, null, null, null, null, null, null, null);
-
-        _magazineDaoMock.Verify(x => x.CountMagazinesByIssn("9876543210"), Times.Once);
-    }
-
-    [Fact]
-    public void TestCountArticles_WhenIsanNotNull_PerformsCountMoviesByIsan()
-    {
-        _articleController.CountArticles(null, null, "1357924680", null, null, null, null, null, null, null);
-
-        _movieDVDDaoMock.Verify(x => x.CountMoviesByIsan("1357924680"), Times.Once);
-    }
-
-    [Fact]
-    public void TestCountArticlesByOtherParameters()
-    {
-        _articleController.CountArticles(null, null, null, "Some Title", "Some Genre", "Some Publisher", DateTime.Now, "Some Author", 1, "Some Director");
-
-        _articleDaoMock.Verify(x => x.CountArticles("Some Title", "Some Genre", "Some Publisher", It.IsAny<DateTime>(), "Some Author", 1, "Some Director"), Times.Once);
-    }
-
-    [Fact]
-    public void TestRemoveArticle_WhenArticleDoesNotExist_ThrowsArticleDoesNotExistException()
-    {
-        _articleDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns((Article)null!);
-
-        Action act = () => _articleController.RemoveArticle(Guid.NewGuid());
-
-        act.Should().Throw<ArticleDoesNotExistException>().WithMessage("Cannot remove Article! Article not in catalogue!");
-    }
-
-    public static IEnumerable<object[]> TestRemoveArticleArgumentsProvider()
-    {
-        return
-        [
-            [null!, null!, typeof(ArticleDoesNotExistException), "Cannot remove Article! Article not in catalogue!"],
-            [ArticleState.ONLOAN, null!, typeof(iLib.src.main.Exceptions.InvalidOperationException), "Cannot remove Article from catalogue! Article currently on loan!"],
-            [ArticleState.ONLOANBOOKED, null!, typeof(iLib.src.main.Exceptions.InvalidOperationException), "Cannot remove Article from catalogue! Article currently on loan!"],
-            [ArticleState.BOOKED, BookingState.ACTIVE, null!, null!],
-            [ArticleState.BOOKED, BookingState.CANCELLED, typeof(iLib.src.main.Exceptions.InvalidOperationException), "Cannot remove Article from catalogue! Inconsistent state!"],
-            [ArticleState.AVAILABLE, null!, null!, null!],
-            [ArticleState.UNAVAILABLE, null!, null!, null!]
-        ];
-    }
-
-[Theory]
-[MemberData(nameof(TestRemoveArticleArgumentsProvider))]
-public void TestRemoveArticle_BehavesCorrectlyBasedOnArticleState(ArticleState? articleState, BookingState? bookingState, Type expectedException, string exceptionMessage)
-{
-    var article = articleState != null ? new Mock<Article>() : null;
-    var booking = bookingState != null ? new Mock<Booking>() : null;
-
-    _articleDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns(article?.Object!);
-    article?.Setup(x => x.State).Returns(articleState!.Value);
-    if (articleState == ArticleState.BOOKED)
-    {
-        _bookingDaoMock.Setup(x => x.SearchBookings(null, article!.Object, 0, 1)).Returns([booking!.Object]);
-        booking.Setup(x => x.State).Returns(bookingState.GetValueOrDefault());
-    }
-
-    Action act = () => _articleController.RemoveArticle(Guid.NewGuid());
-
-    if (expectedException == null)
-    {
-        act.Should().NotThrow();
-
-        if (bookingState == BookingState.ACTIVE)
-        {
-            booking!.VerifySet(x => x.State = BookingState.CANCELLED, Times.Once);
-            _articleDaoMock.Verify(x => x.Delete(article!.Object), Times.Once);
-        }
-    }
-    else
-    {
-        switch (expectedException.Name)
-        {
-            case nameof(ArticleDoesNotExistException):
-                act.Should().ThrowExactly<ArticleDoesNotExistException>().WithMessage(exceptionMessage);
-                break;
-            case nameof(iLib.src.main.Exceptions.InvalidOperationException):
-                act.Should().ThrowExactly<iLib.src.main.Exceptions.InvalidOperationException>().WithMessage(exceptionMessage);
-                break;
-            default:
-                throw new iLib.src.main.Exceptions.InvalidOperationException($"Unhandled exception type: {expectedException.Name}");
-        }
-    }
-}
-
 }

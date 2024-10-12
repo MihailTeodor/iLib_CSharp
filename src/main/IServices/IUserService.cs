@@ -1,9 +1,9 @@
 using iLib.src.main.DTO;
 using iLib.src.main.Model;
 
-namespace iLib.src.main.IControllers
+namespace iLib.src.main.IServices
 {
-    public interface IUserController
+    public interface IUserService
     {
         Guid AddUser(UserDTO userDTO);
         void UpdateUser(Guid id, UserDTO userDTO);

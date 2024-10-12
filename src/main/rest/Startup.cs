@@ -1,8 +1,8 @@
 using Microsoft.AspNetCore.Authentication;
 using iLib.src.main.IDAO;
-using iLib.src.main.Controllers;
+using iLib.src.main.Services;
 using iLib.src.main.DAO;
-using iLib.src.main.IControllers;
+using iLib.src.main.IServices;
 using iLib.src.main.Utils;
 using Newtonsoft.Json.Converters;
 
@@ -27,11 +27,11 @@ namespace iLib.src.main.rest
             services.AddScoped<IBookingDao, BookingDao>();
             services.AddScoped<ILoanDao, LoanDao>();
 
-            // Register Controllers with their interfaces
-            services.AddScoped<IUserController, UserController>();
-            services.AddScoped<IArticleController, ArticleController>();
-            services.AddScoped<IBookingController, BookingController>();
-            services.AddScoped<ILoanController, LoanController>();
+            // Register Services with their interfaces
+            services.AddScoped<IUserService, UserService>();
+            services.AddScoped<IArticleService, ArticleService>();
+            services.AddScoped<IBookingService, BookingService>();
+            services.AddScoped<ILoanService, LoanService>();
 
             // Add authentication
             services.AddAuthentication("Bearer")

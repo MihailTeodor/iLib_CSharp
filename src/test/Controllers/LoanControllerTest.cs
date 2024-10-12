@@ -1,433 +1,566 @@
-using FluentAssertions;
-using Moq;
 using Xunit;
-using iLib.src.main.Controllers;
-using iLib.src.main.Exceptions;
+using Newtonsoft.Json.Linq;
+using RestSharp;
 using iLib.src.main.Model;
-using iLib.src.main.IDAO;
+using iLib.src.main.Utils;
 
+[Collection("Endpoints Tests")]
 public class LoanControllerTest
 {
-    private readonly LoanController _loanController;
-    private readonly Mock<IUserDao> _userDaoMock;
-    private readonly Mock<IArticleDao> _articleDaoMock;
-    private readonly Mock<ILoanDao> _loanDaoMock;
-    private readonly Mock<IBookingDao> _bookingDaoMock;
-
-    private readonly DateTime _today = DateTime.Now;
+    private readonly NHibernate.ISession _session;
+    private User? adminUser;
+    private User? citizenUser;
+    private string? adminToken;
+    private string? citizenToken;
 
     public LoanControllerTest()
     {
-        _userDaoMock = new Mock<IUserDao>();
-        _articleDaoMock = new Mock<IArticleDao>();
-        _loanDaoMock = new Mock<ILoanDao>();
-        _bookingDaoMock = new Mock<IBookingDao>();
+        _session = NHibernateHelper.OpenSession();
+    }
 
-        _loanController = new LoanController(
-            _userDaoMock.Object,
-            _articleDaoMock.Object,
-            _loanDaoMock.Object,
-            _bookingDaoMock.Object
-        );
+    private async Task InitializeDatabase()
+    {
+        await QueryUtils.TruncateAllTables(_session);
+
+        adminUser = await QueryUtils.CreateUser(_session, Guid.NewGuid(), "admin@example.com", "admin password", "adminName", "adminSurname", "adminAddress", "adminTelephoneNumber", UserRole.ADMINISTRATOR);
+        adminToken = await AuthHelper.GetAuthToken("admin@example.com", "admin password");
+
+        citizenUser = await QueryUtils.CreateUser(_session, Guid.NewGuid(), "user@Email.com", "user password", "name", "surname", "address", "123432", UserRole.CITIZEN);
+        citizenToken = await AuthHelper.GetAuthToken("user@Email.com", "user password");
     }
 
     [Fact]
-    public void TestRegisterLoan_WhenUserDoesNotExist_ThrowsUserDoesNotExistException()
+    public async Task TestRegisterLoan_Success()
     {
-        var mockArticle = new Mock<Article>();
-        _userDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns((User)null!);
-        _articleDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns(mockArticle.Object);
+        await InitializeDatabase();
 
-        Action act = () => _loanController.RegisterLoan(Guid.NewGuid(), Guid.NewGuid());
+        var book = await QueryUtils.CreateBook(_session, Guid.NewGuid(), "Shelf 1", "Book 1", DateTime.Now, "Publisher 1", "Fiction", "Description 1", ArticleState.AVAILABLE, "Author 1", "1234567890");
 
-        act.Should().Throw<UserDoesNotExistException>().WithMessage("Cannot register Loan, specified User not present in the system!");
+        var client = new RestClient("http://localhost:5062/ilib/v1/loansEndpoint");
+        var request = new RestRequest("");
+        request.AddHeader("Authorization", "Bearer " + adminToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddQueryParameter("userId", citizenUser!.Id.ToString());
+        request.AddQueryParameter("articleId", book.Id.ToString());
+
+        var response = await client.ExecutePostAsync(request);
+        var content = JObject.Parse(response.Content!);
+
+        Assert.Equal(201, (int)response.StatusCode);
+        Assert.True(content.ContainsKey("loanId"));
     }
 
     [Fact]
-    public void TestRegisterLoan_WhenArticleDoesNotExist_ThrowsArticleDoesNotExistException()
+    public async Task TestRegisterLoan_Unauthorized()
     {
-        var mockUser = new Mock<User>();
-        _articleDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns((Article)null!);
-        _userDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns(mockUser.Object);
+        await InitializeDatabase();
 
-        Action act = () => _loanController.RegisterLoan(Guid.NewGuid(), Guid.NewGuid());
+        var client = new RestClient("http://localhost:5062/ilib/v1/loansEndpoint");
+        var request = new RestRequest("");
+        request.AddHeader("Authorization", "Bearer " + citizenToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddQueryParameter("userId", adminUser!.Id.ToString());
+        request.AddQueryParameter("articleId", Guid.NewGuid().ToString());
 
-        act.Should().Throw<ArticleDoesNotExistException>().WithMessage("Cannot register Loan, specified Article not present in catalogue!");
+        var response = await client.ExecutePostAsync(request);
+
+        Assert.Equal(403, (int)response.StatusCode);
     }
 
     [Fact]
-    public void TestRegisterLoan_WhenArticleBookedByAnotherUser_ThrowsInvalidOperationException()
+    public async Task TestRegisterLoan_MissingUser()
     {
-        var mockUser = new Mock<User>();
-        var mockOtherUser = new Mock<User>();
-        var mockArticle = new Mock<Article>();
-        var mockBooking = new Mock<Booking>();
-        mockBooking.Setup(x => x.BookingUser).Returns(mockOtherUser.Object);
+        await InitializeDatabase();
 
-        _userDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns(mockUser.Object);
-        _articleDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns(mockArticle.Object);
-        mockArticle.Setup(x => x.State).Returns(ArticleState.BOOKED);
-        _bookingDaoMock.Setup(x => x.SearchBookings(null, mockArticle.Object, 0, 1)).Returns([mockBooking.Object]);
+        var book = await QueryUtils.CreateBook(_session, Guid.NewGuid(), "Shelf 1", "Book 1", DateTime.Now, "Publisher 1", "Fiction", "Description 1", ArticleState.AVAILABLE, "Author 1", "1234567890");
 
-        Action act = () => _loanController.RegisterLoan(Guid.NewGuid(), Guid.NewGuid());
+        var client = new RestClient("http://localhost:5062/ilib/v1/loansEndpoint");
+        var request = new RestRequest("");
+        request.AddHeader("Authorization", "Bearer " + adminToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddQueryParameter("articleId", book.Id.ToString());
 
-        act.Should().Throw<iLib.src.main.Exceptions.InvalidOperationException>().WithMessage("Cannot register Loan, specified Article is booked by another user!");
+        var response = await client.ExecutePostAsync(request);
+        var content = JObject.Parse(response.Content!);
+
+        Assert.Equal(400, (int)response.StatusCode);
+        Assert.Equal("Cannot register Loan, User not specified!", content["error"]!.ToString());
     }
 
-    [Theory]
-    [InlineData(ArticleState.ONLOAN)]
-    [InlineData(ArticleState.ONLOANBOOKED)]
-    [InlineData(ArticleState.UNAVAILABLE)]
-    public void TestRegisterLoan_WhenArticleNotLendable_ThrowsInvalidOperationException(ArticleState state)
+    [Fact]
+    public async Task TestRegisterLoan_MissingArticle()
     {
-        var mockUser = new Mock<User>();
-        _userDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns(mockUser.Object);
-        var mockArticle = new Mock<Article>();
-        _articleDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns(mockArticle.Object);
-        mockArticle.Setup(x => x.State).Returns(state);
+        await InitializeDatabase();
 
-        Action act = () => _loanController.RegisterLoan(Guid.NewGuid(), Guid.NewGuid());
+        var client = new RestClient("http://localhost:5062/ilib/v1/loansEndpoint");
+        var request = new RestRequest("");
+        request.AddHeader("Authorization", "Bearer " + adminToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddQueryParameter("userId", citizenUser!.Id.ToString());
 
-        if (state == ArticleState.UNAVAILABLE)
-            act.Should().Throw<iLib.src.main.Exceptions.InvalidOperationException>().WithMessage("Cannot register Loan, specified Article is UNAVAILABLE!");
-        else
-            act.Should().Throw<iLib.src.main.Exceptions.InvalidOperationException>().WithMessage("Cannot register Loan, specified Article is already on loan!");
+        var response = await client.ExecutePostAsync(request);
+        var content = JObject.Parse(response.Content!);
+
+        Assert.Equal(400, (int)response.StatusCode);
+        Assert.Equal("Cannot register Loan, Article not specified!", content["error"]!.ToString());
     }
 
- [Fact]
-public void TestRegisterLoan_WhenSuccessfulRegistration()
-{
-    var userId = Guid.NewGuid();
-    var articleId = Guid.NewGuid();
+    [Fact]
+    public async Task TestRegisterLoan_UserNotFound()
+    {
+        await InitializeDatabase();
 
-    var mockUser = new Mock<User>();
-    var mockArticle = new Mock<Article>();
-    var mockBooking = new Mock<Booking>();
+        var book = await QueryUtils.CreateBook(_session, Guid.NewGuid(), "Shelf 1", "Book 1", DateTime.Now, "Publisher 1", "Fiction", "Description 1", ArticleState.AVAILABLE, "Author 1", "1234567890");
 
-    _userDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns(mockUser.Object);
-    _articleDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns(mockArticle.Object);
-    mockBooking.Setup(x => x.BookingUser).Returns(mockUser.Object);
-    mockArticle.Setup(x => x.State).Returns(ArticleState.BOOKED);
-    _bookingDaoMock.Setup(x => x.SearchBookings(null, mockArticle.Object, 0, 1)).Returns([mockBooking.Object]);
+        var client = new RestClient("http://localhost:5062/ilib/v1/loansEndpoint");
+        var request = new RestRequest("");
+        request.AddHeader("Authorization", "Bearer " + adminToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddQueryParameter("userId", Guid.NewGuid().ToString());
+        request.AddQueryParameter("articleId", book.Id.ToString());
 
-    Loan capturedLoan = null!;
-    _loanDaoMock.Setup(x => x.Save(It.IsAny<Loan>())).Callback<Loan>(loan => capturedLoan = loan);
+        var response = await client.ExecutePostAsync(request);
+        var content = JObject.Parse(response.Content!);
 
-    var returnedId = _loanController.RegisterLoan(userId, articleId);
+        Assert.Equal(404, (int)response.StatusCode);
+        Assert.Equal("Cannot register Loan, specified User not present in the system!", content["error"]!.ToString());
+    }
 
-    _loanDaoMock.Verify(x => x.Save(It.IsAny<Loan>()), Times.Once);
-    capturedLoan.Should().NotBeNull();
-    capturedLoan.LoaningUser!.Id.Should().Be(mockUser.Object.Id);
-    capturedLoan.ArticleOnLoan!.Id.Should().Be(mockArticle.Object.Id);
-    capturedLoan.LoanDate.Date.Should().Be(_today.Date);
-    capturedLoan.DueDate.Date.Should().Be(_today.AddMonths(1).Date);
-    capturedLoan.Renewed.Should().BeFalse();
-    capturedLoan.State.Should().Be(LoanState.ACTIVE);
-    mockArticle.VerifySet(x => x.State = ArticleState.ONLOAN, Times.Once);
+    [Fact]
+    public async Task TestRegisterLoan_ArticleNotFound()
+    {
+        await InitializeDatabase();
+
+        var client = new RestClient("http://localhost:5062/ilib/v1/loansEndpoint");
+        var request = new RestRequest("");
+        request.AddHeader("Authorization", "Bearer " + adminToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddQueryParameter("userId", citizenUser!.Id.ToString());
+        request.AddQueryParameter("articleId", Guid.NewGuid().ToString());
+
+        var response = await client.ExecutePostAsync(request);
+        var content = JObject.Parse(response.Content!);
+
+        Assert.Equal(404, (int)response.StatusCode);
+        Assert.Equal("Cannot register Loan, specified Article not present in catalogue!", content["error"]!.ToString());
+    }
+
+    [Fact]
+    public async Task TestRegisterLoan_ArticleAlreadyOnLoan()
+    {
+        await InitializeDatabase();
+
+        var book = await QueryUtils.CreateBook(_session, Guid.NewGuid(), "Shelf 1", "Book 1", DateTime.Now, "Publisher 1", "Fiction", "Description 1", ArticleState.ONLOAN, "Author 1", "1234567890");
+        await QueryUtils.CreateLoan(_session, Guid.NewGuid(), DateTime.Now, DateTime.Now.AddMonths(1), LoanState.ACTIVE, false, book, citizenUser!);
+
+        var client = new RestClient("http://localhost:5062/ilib/v1/loansEndpoint");
+        var request = new RestRequest("");
+        request.AddHeader("Authorization", "Bearer " + adminToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddQueryParameter("userId", citizenUser!.Id.ToString());
+        request.AddQueryParameter("articleId", book.Id.ToString());
+
+        var response = await client.ExecutePostAsync(request);
+        var content = JObject.Parse(response.Content!);
+
+        Assert.Equal(400, (int)response.StatusCode);
+        Assert.Equal("Cannot register Loan, specified Article is already on loan!", content["error"]!.ToString());
+    }
+
+    [Fact]
+    public async Task TestRegisterReturn_Success()
+    {
+        await InitializeDatabase();
+
+        var book = await QueryUtils.CreateBook(_session, Guid.NewGuid(), "Shelf 1", "Book 1", DateTime.Now, "Publisher 1", "Fiction", "Description 1", ArticleState.ONLOAN, "Author 1", "1234567890");
+        var loan = await QueryUtils.CreateLoan(_session, Guid.NewGuid(), DateTime.Now, DateTime.Now.AddMonths(1), LoanState.ACTIVE, false, book, citizenUser!);
+
+        var client = new RestClient("http://localhost:5062/ilib/v1/loansEndpoint");
+        var request = new RestRequest("/{loanId}/return");
+        request.AddHeader("Authorization", "Bearer " + adminToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddParameter("loanId", loan.Id, ParameterType.UrlSegment);
+
+        var response = await client.ExecutePatchAsync(request);
+        var content = JObject.Parse(response.Content!);
+
+        Assert.Equal(200, (int)response.StatusCode);
+        Assert.Equal("Loan successfully returned.", content["message"]!.ToString());
+    }
+
+    [Fact]
+    public async Task TestRegisterReturn_Unauthorized()
+    {
+        await InitializeDatabase();
+
+        var book = await QueryUtils.CreateBook(_session, Guid.NewGuid(), "Shelf 1", "Book 1", DateTime.Now, "Publisher 1", "Fiction", "Description 1", ArticleState.ONLOAN, "Author 1", "1234567890");
+        var loan = await QueryUtils.CreateLoan(_session, Guid.NewGuid(), DateTime.Now, DateTime.Now.AddMonths(1), LoanState.ACTIVE, false, book, citizenUser!);
+
+        var client = new RestClient("http://localhost:5062/ilib/v1/loansEndpoint");
+        var request = new RestRequest("/{loanId}/return");
+        request.AddHeader("Authorization", "Bearer " + citizenToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddParameter("loanId", loan.Id, ParameterType.UrlSegment);
+
+        var response = await client.ExecutePatchAsync(request);
+
+        Assert.Equal(403, (int)response.StatusCode);
+    }
+
+    [Fact]
+    public async Task TestRegisterReturn_LoanNotFound()
+    {
+        await InitializeDatabase();
+
+        var client = new RestClient("http://localhost:5062/ilib/v1/loansEndpoint");
+        var request = new RestRequest("/{loanId}/return");
+        request.AddHeader("Authorization", "Bearer " + adminToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddParameter("loanId", Guid.NewGuid(), ParameterType.UrlSegment);
+
+        var response = await client.ExecutePatchAsync(request);
+        var content = JObject.Parse(response.Content!);
+
+        Assert.Equal(404, (int)response.StatusCode);
+        Assert.Equal("Cannot return article! Loan not registered!", content["error"]!.ToString());
+    }
+
+    [Fact]
+    public async Task TestRegisterReturn_AlreadyReturned()
+    {
+        await InitializeDatabase();
+
+        var book = await QueryUtils.CreateBook(_session, Guid.NewGuid(), "Shelf 1", "Book 1", DateTime.Now, "Publisher 1", "Fiction", "Description 1", ArticleState.AVAILABLE, "Author 1", "1234567890");
+        var loan = await QueryUtils.CreateLoan(_session, Guid.NewGuid(), DateTime.Now, DateTime.Now.AddMonths(1), LoanState.RETURNED, false, book, citizenUser!);
+
+        var client = new RestClient("http://localhost:5062/ilib/v1/loansEndpoint");
+        var request = new RestRequest("/{loanId}/return");
+        request.AddHeader("Authorization", "Bearer " + adminToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddParameter("loanId", loan.Id, ParameterType.UrlSegment);
+
+        var response = await client.ExecutePatchAsync(request);
+        var content = JObject.Parse(response.Content!);
+
+        Assert.Equal(400, (int)response.StatusCode);
+        Assert.Equal("Cannot return article! Loan has already been returned!", content["error"]!.ToString());
+    }
+
+    [Fact]
+    public async Task TestGetLoanInfo_Success()
+    {
+        await InitializeDatabase();
+
+        var book = await QueryUtils.CreateBook(_session, Guid.NewGuid(), "Shelf 1", "Book 1", DateTime.Now, "Publisher 1", "Fiction", "Description 1", ArticleState.AVAILABLE, "Author 1", "1234567890");
+        var loan = await QueryUtils.CreateLoan(_session, Guid.NewGuid(), DateTime.Now, DateTime.Now.AddMonths(1), LoanState.ACTIVE, false, book, citizenUser!);
+
+        var client = new RestClient("http://localhost:5062/ilib/v1/loansEndpoint");
+        var request = new RestRequest("/{loanId}");
+        request.AddHeader("Authorization", "Bearer " + adminToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddParameter("loanId", loan.Id, ParameterType.UrlSegment);
+
+        var response = await client.ExecuteGetAsync(request);
+        var content = JObject.Parse(response.Content!);
+
+        Assert.Equal(200, (int)response.StatusCode);
+        Assert.Equal(loan.Id.ToString(), content["id"]!.ToString());
+        Assert.Equal(loan.ArticleOnLoan!.Id.ToString(), content["articleId"]!.ToString());
+        Assert.Equal(loan.ArticleOnLoan.Title, content["articleTitle"]!.ToString());
+        Assert.Equal(loan.LoaningUser!.Id.ToString(), content["loaningUserId"]!.ToString());
+        Assert.Equal(loan.Renewed, content["renewed"]!.ToObject<bool>());
+        Assert.Equal(loan.State.ToString(), content["state"]!.ToString());
+        Assert.Equal(loan.LoanDate.Date, content["loanDate"]!.ToObject<DateTime>().Date);
+        Assert.Equal(loan.DueDate.Date, content["dueDate"]!.ToObject<DateTime>().Date);
+    }
+
+    [Fact]
+    public async Task TestGetLoanInfo_LoanNotFound()
+    {
+        await InitializeDatabase();
+
+        var client = new RestClient("http://localhost:5062/ilib/v1/loansEndpoint");
+        var request = new RestRequest("/{loanId}");
+        request.AddHeader("Authorization", "Bearer " + adminToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddParameter("loanId", Guid.NewGuid(), ParameterType.UrlSegment);
+
+        var response = await client.ExecuteGetAsync(request);
+        var content = JObject.Parse(response.Content!);
+
+        Assert.Equal(404, (int)response.StatusCode);
+        Assert.Equal("Specified Loan not registered in the system!", content["error"]!.ToString());
+    }
+
+    [Fact]
+    public async Task TestGetLoansByUser_Success()
+    {
+        await InitializeDatabase();
+
+        var book = await QueryUtils.CreateBook(_session, Guid.NewGuid(), "Shelf 1", "Book 1", DateTime.Now, "Publisher 1", "Fiction", "Description 1", ArticleState.AVAILABLE, "Author 1", "1234567890");
+        var loan = await QueryUtils.CreateLoan(_session, Guid.NewGuid(), DateTime.Now, DateTime.Now.AddMonths(1), LoanState.ACTIVE, false, book, citizenUser!);
+
+        var client = new RestClient("http://localhost:5062/ilib/v1/loansEndpoint");
+        var request = new RestRequest("/{userId}/loans");
+        request.AddHeader("Authorization", "Bearer " + citizenToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddParameter("userId", citizenUser!.Id, ParameterType.UrlSegment);
+
+        var response = await client.ExecuteGetAsync(request);
+        var content = JObject.Parse(response.Content!);
+
+        Assert.Equal(200, (int)response.StatusCode);
+        Assert.True(content.ContainsKey("items"));
+        var itemsArray = content["items"] as JArray;
+        Assert.Single(itemsArray!);
+
+        var loanObject = itemsArray!.First() as JObject;
+        Assert.Equal(loan.Id.ToString(), loanObject!["id"]!.ToString());
+        Assert.Equal(loan.ArticleOnLoan!.Id.ToString(), loanObject["articleId"]!.ToString());
+        Assert.Equal(loan.ArticleOnLoan.Title, loanObject["articleTitle"]!.ToString());
+        Assert.Equal(loan.LoaningUser!.Id.ToString(), loanObject["loaningUserId"]!.ToString());
+        Assert.Equal(loan.State.ToString(), loanObject["state"]!.ToString());
+        Assert.Equal(loan.Renewed, loanObject["renewed"]!.ToObject<bool>());
+        Assert.Equal(loan.LoanDate.Date, loanObject["loanDate"]!.ToObject<DateTime>().Date);
+        Assert.Equal(loan.DueDate.Date, loanObject["dueDate"]!.ToObject<DateTime>().Date);
+    }
+
+    [Fact]
+    public async Task TestGetLoansByUser_InvalidPagination()
+    {
+        await InitializeDatabase();
+
+        var client = new RestClient("http://localhost:5062/ilib/v1/loansEndpoint");
+        var request = new RestRequest("/{userId}/loans");
+        request.AddHeader("Authorization", "Bearer " + citizenToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddParameter("userId", citizenUser!.Id, ParameterType.UrlSegment);
+        request.AddQueryParameter("pageNumber", "0");
+        request.AddQueryParameter("resultsPerPage", "-1");
+
+        var response = await client.ExecuteGetAsync(request);
+        var content = JObject.Parse(response.Content!);
+
+        Assert.Equal(400, (int)response.StatusCode);
+        Assert.Equal("Pagination parameters incorrect!", content["error"]!.ToString());
+    }
+
+    [Fact]
+    public async Task TestGetLoansByUser_Unauthorized()
+    {
+        await InitializeDatabase();
+
+        var book = await QueryUtils.CreateBook(_session, Guid.NewGuid(), "Shelf 1", "Book 1", DateTime.Now, "Publisher 1", "Fiction", "Description 1", ArticleState.AVAILABLE, "Author 1", "1234567890");
+        var loan = await QueryUtils.CreateLoan(_session, Guid.NewGuid(), DateTime.Now, DateTime.Now.AddMonths(1), LoanState.ACTIVE, false, book, citizenUser!);
+
+        var otherUser = await QueryUtils.CreateUser(_session, Guid.NewGuid(), "other@Email.com", "other password", "other", "surname", "address", "123432", UserRole.CITIZEN);
+        var otherUserToken = await AuthHelper.GetAuthToken("other@Email.com", "other password");
+
+        var client = new RestClient("http://localhost:5062/ilib/v1/loansEndpoint");
+        var request = new RestRequest("/{userId}/loans");
+        request.AddHeader("Authorization", "Bearer " + otherUserToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddParameter("userId", citizenUser!.Id, ParameterType.UrlSegment);
+
+        var response = await client.ExecuteGetAsync(request);
+
+        Assert.Equal(401, (int)response.StatusCode);
+    }
+
+    [Fact]
+    public async Task TestGetLoansByUser_UserNotFound()
+    {
+        await InitializeDatabase();
+
+        var client = new RestClient("http://localhost:5062/ilib/v1/loansEndpoint");
+        var request = new RestRequest("/{userId}/loans");
+        request.AddHeader("Authorization", "Bearer " + adminToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddParameter("userId", Guid.NewGuid(), ParameterType.UrlSegment);
+
+        var response = await client.ExecuteGetAsync(request);
+        var content = JObject.Parse(response.Content!);
+
+        Assert.Equal(404, (int)response.StatusCode);
+        Assert.Equal("Specified user is not registered in the system!", content["error"]!.ToString());
+    }
+
+    [Fact]
+    public async Task TestGetLoansByUser_LoansNotFound()
+    {
+        await InitializeDatabase();
+
+        var newUser = await QueryUtils.CreateUser(_session, Guid.NewGuid(), "noloans@Email.com", "user password", "No", "Loans", "address", "123432", UserRole.CITIZEN);
+
+        var client = new RestClient("http://localhost:5062/ilib/v1/loansEndpoint");
+        var request = new RestRequest("/{userId}/loans");
+        request.AddHeader("Authorization", "Bearer " + adminToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddParameter("userId", newUser.Id, ParameterType.UrlSegment);
+
+        var response = await client.ExecuteGetAsync(request);
+        var content = JObject.Parse(response.Content!);
+
+        Assert.Equal(404, (int)response.StatusCode);
+        Assert.Equal("No loans relative to the specified user found!", content["error"]!.ToString());
+    }
+
+    [Fact]
+    public async Task TestGetLoansByUser_MultipleResults()
+    {
+        await InitializeDatabase();
+
+        var book1 = await QueryUtils.CreateBook(_session, Guid.NewGuid(), "Shelf 1", "Book 1", DateTime.Now, "Publisher 1", "Fiction", "Description 1", ArticleState.AVAILABLE, "Author 1", "1234567890");
+        var book2 = await QueryUtils.CreateBook(_session, Guid.NewGuid(), "Shelf 2", "Book 2", DateTime.Now, "Publisher 2", "Fiction", "Description 2", ArticleState.AVAILABLE, "Author 2", "1234567890");
+
+        await QueryUtils.CreateLoan(_session, Guid.NewGuid(), DateTime.Now, DateTime.Now.AddMonths(1), LoanState.ACTIVE, false, book1, citizenUser!);
+        await QueryUtils.CreateLoan(_session, Guid.NewGuid(), DateTime.Now, DateTime.Now.AddMonths(1), LoanState.ACTIVE, false, book2, citizenUser!);
+
+        var client = new RestClient("http://localhost:5062/ilib/v1/loansEndpoint");
+        var request = new RestRequest("/{userId}/loans");
+        request.AddHeader("Authorization", "Bearer " + adminToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddParameter("userId", citizenUser!.Id, ParameterType.UrlSegment);
+        request.AddQueryParameter("resultsPerPage", "1");
+        request.AddQueryParameter("pageNumber", "1");
+
+        var response = await client.ExecuteGetAsync(request);
+        var content = JObject.Parse(response.Content!);
+
+        Assert.Equal(200, (int)response.StatusCode);
+        Assert.True(content.ContainsKey("items"));
+        var itemsArray = content["items"] as JArray;
+        Assert.Single(itemsArray!);
+
+        Assert.Equal(1, content["pageNumber"]!.ToObject<int>());
+        Assert.Equal(1, content["resultsPerPage"]!.ToObject<int>());
+        Assert.Equal(2, content["totalResults"]!.ToObject<int>());
+        Assert.Equal(2, content["totalPages"]!.ToObject<int>());
+    }
+
+    [Fact]
+    public async Task TestGetLoansByUser_Pagination()
+    {
+        await InitializeDatabase();
+
+        var book1 = await QueryUtils.CreateBook(_session, Guid.NewGuid(), "Shelf 1", "Book 1", DateTime.Now, "Publisher 1", "Fiction", "Description 1", ArticleState.AVAILABLE, "Author 1", "1234567890");
+        var book2 = await QueryUtils.CreateBook(_session, Guid.NewGuid(), "Shelf 2", "Book 2", DateTime.Now, "Publisher 2", "Fiction", "Description 2", ArticleState.AVAILABLE, "Author 2", "1234567890");
+        var book3 = await QueryUtils.CreateBook(_session, Guid.NewGuid(), "Shelf 3", "Book 3", DateTime.Now, "Publisher 3", "Fiction", "Description 3", ArticleState.AVAILABLE, "Author 3", "1234567890");
+        var book4 = await QueryUtils.CreateBook(_session, Guid.NewGuid(), "Shelf 4", "Book 4", DateTime.Now, "Publisher 4", "Fiction", "Description 4", ArticleState.AVAILABLE, "Author 4", "1234567890");
+
+        var loan1 = await QueryUtils.CreateLoan(_session, Guid.NewGuid(), DateTime.Now.AddDays(1), DateTime.Now.AddMonths(1).AddDays(1), LoanState.ACTIVE, false, book1, citizenUser!);
+        var loan2 = await QueryUtils.CreateLoan(_session, Guid.NewGuid(), DateTime.Now.AddDays(2), DateTime.Now.AddMonths(1).AddDays(2), LoanState.ACTIVE, false, book2, citizenUser!);
+        var loan3 = await QueryUtils.CreateLoan(_session, Guid.NewGuid(), DateTime.Now.AddDays(3), DateTime.Now.AddMonths(1).AddDays(3), LoanState.ACTIVE, false, book3, citizenUser!);
+        var loan4 = await QueryUtils.CreateLoan(_session, Guid.NewGuid(), DateTime.Now.AddDays(4), DateTime.Now.AddMonths(1).AddDays(4), LoanState.ACTIVE, false, book4, citizenUser!);
+
+        var client = new RestClient("http://localhost:5062/ilib/v1/loansEndpoint");
+        var request = new RestRequest("/{userId}/loans");
+        request.AddHeader("Authorization", "Bearer " + adminToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddParameter("userId", citizenUser!.Id, ParameterType.UrlSegment);
+        request.AddQueryParameter("resultsPerPage", "2");
+        request.AddQueryParameter("pageNumber", "2");
+
+        var response = await client.ExecuteGetAsync(request);
+        var content = JObject.Parse(response.Content!);
+
+        Assert.Equal(200, (int)response.StatusCode);
+        Assert.True(content.ContainsKey("items"));
+        var itemsArray = content["items"] as JArray;
+        Assert.Equal(2, itemsArray!.Count);
+
+        var loanObject1 = itemsArray[0] as JObject;
+        Assert.Equal(loan2.Id.ToString(), loanObject1!["id"]!.ToString());
+
+        var loanObject2 = itemsArray[1] as JObject;
+        Assert.Equal(loan1.Id.ToString(), loanObject2!["id"]!.ToString());
+
+        Assert.Equal(2, content["pageNumber"]!.ToObject<int>());
+        Assert.Equal(2, content["resultsPerPage"]!.ToObject<int>());
+        Assert.Equal(4, content["totalResults"]!.ToObject<int>());
+        Assert.Equal(2, content["totalPages"]!.ToObject<int>());
+    }
+
+    [Fact]
+    public async Task TestExtendLoan_Success()
+    {
+        await InitializeDatabase();
+
+        var book = await QueryUtils.CreateBook(_session, Guid.NewGuid(), "Shelf 1", "Book 1", DateTime.Now, "Publisher 1", "Fiction", "Description 1", ArticleState.ONLOAN, "Author 1", "1234567890");
+        var loan = await QueryUtils.CreateLoan(_session, Guid.NewGuid(), DateTime.Now, DateTime.Now.AddMonths(1), LoanState.ACTIVE, false, book, citizenUser!);
+
+        var client = new RestClient("http://localhost:5062/ilib/v1/loansEndpoint");
+        var request = new RestRequest("/{loanId}/extend");
+        request.AddHeader("Authorization", "Bearer " + citizenToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddParameter("loanId", loan.Id, ParameterType.UrlSegment);
+
+        var response = await client.ExecutePatchAsync(request);
+        var content = JObject.Parse(response.Content!);
+
+        Assert.Equal(200, (int)response.StatusCode);
+        Assert.Equal("Loan extended successfully.", content["message"]!.ToString());
+    }
+
+    [Fact]
+    public async Task TestExtendLoan_Unauthorized()
+    {
+        await InitializeDatabase();
+
+        var book = await QueryUtils.CreateBook(_session, Guid.NewGuid(), "Shelf 1", "Book 1", DateTime.Now, "Publisher 1", "Fiction", "Description 1", ArticleState.ONLOAN, "Author 1", "1234567890");
+        var loan = await QueryUtils.CreateLoan(_session, Guid.NewGuid(), DateTime.Now, DateTime.Now.AddMonths(1), LoanState.ACTIVE, false, book, citizenUser!);
+
+        var otherUser = await QueryUtils.CreateUser(_session, Guid.NewGuid(), "other@Email.com", "other password", "other", "surname", "address", "123432", UserRole.CITIZEN);
+        var otherUserToken = await AuthHelper.GetAuthToken("other@Email.com", "other password");
+
+        var client = new RestClient("http://localhost:5062/ilib/v1/loansEndpoint");
+        var request = new RestRequest("/{loanId}/extend");
+        request.AddHeader("Authorization", "Bearer " + otherUserToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddParameter("loanId", loan.Id, ParameterType.UrlSegment);
+
+        var response = await client.ExecutePatchAsync(request);
+
+        Assert.Equal(401, (int)response.StatusCode);
+    }
+
+    [Fact]
+    public async Task TestExtendLoan_LoanNotFound()
+    {
+        await InitializeDatabase();
+
+        var client = new RestClient("http://localhost:5062/ilib/v1/loansEndpoint");
+        var request = new RestRequest("/{loanId}/extend");
+        request.AddHeader("Authorization", "Bearer " + adminToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddParameter("loanId", Guid.NewGuid(), ParameterType.UrlSegment);
+
+        var response = await client.ExecutePatchAsync(request);
+        var content = JObject.Parse(response.Content!);
+
+        Assert.Equal(404, (int)response.StatusCode);
+        Assert.Equal("Specified Loan not registered in the system!", content["error"]!.ToString());
+    }
+
+    [Fact]
+    public async Task TestExtendLoan_InvalidOperation()
+    {
+        await InitializeDatabase();
+
+        var book = await QueryUtils.CreateBook(_session, Guid.NewGuid(), "Shelf 1", "Book 1", DateTime.Now, "Publisher 1", "Fiction", "Description 1", ArticleState.ONLOANBOOKED, "Author 1", "1234567890");
+        var loan = await QueryUtils.CreateLoan(_session, Guid.NewGuid(), DateTime.Now, DateTime.Now.AddMonths(1), LoanState.ACTIVE, false, book, citizenUser!);
+
+        var client = new RestClient("http://localhost:5062/ilib/v1/loansEndpoint");
+        var request = new RestRequest("/{loanId}/extend");
+        request.AddHeader("Authorization", "Bearer " + citizenToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddParameter("loanId", loan.Id, ParameterType.UrlSegment);
+
+        var response = await client.ExecutePatchAsync(request);
+        var content = JObject.Parse(response.Content!);
+
+        Assert.Equal(400, (int)response.StatusCode);
+        Assert.Equal("Cannot extend loan, another User has booked the Article!", content["error"]!.ToString());
+    }
 }
 
-
-    [Fact]
-    public void TestRegisterReturn_WhenLoanNotFound_ThrowsLoanDoesNotExistException()
-    {
-        _loanDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns((Loan)null!);
-
-        Action act = () => _loanController.RegisterReturn(Guid.NewGuid());
-
-        act.Should().Throw<LoanDoesNotExistException>().WithMessage("Cannot return article! Loan not registered!");
-    }
-
-    [Fact]
-    public void TestRegisterReturn_WhenLoanAlreadyReturned_ThrowsInvalidOperationException()
-    {
-        var mockLoan = new Mock<Loan>();
-        mockLoan.Setup(x => x.State).Returns(LoanState.RETURNED);
-        _loanDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns(mockLoan.Object);
-
-        Action act = () => _loanController.RegisterReturn(Guid.NewGuid());
-
-        act.Should().Throw<iLib.src.main.Exceptions.InvalidOperationException>().WithMessage("Cannot return article! Loan has already been returned!");
-    }
-
-    [Theory]
-    [InlineData(ArticleState.ONLOAN)]
-    [InlineData(ArticleState.UNAVAILABLE)]
-    public void TestRegisterReturn_WhenArticleOnloanOrUnavailable_ThenReturnsSuccessfully(ArticleState state)
-    {
-        var mockLoan = new Mock<Loan>();
-        var mockArticle = new Mock<Article>();
-
-        _loanDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns(mockLoan.Object);
-        mockLoan.Setup(x => x.State).Returns(LoanState.ACTIVE);
-        mockLoan.Setup(x => x.ArticleOnLoan).Returns(mockArticle.Object);
-        mockArticle.Setup(x => x.State).Returns(state);
-
-        _loanController.RegisterReturn(Guid.NewGuid());
-
-        mockArticle.VerifySet(x => x.State = ArticleState.AVAILABLE, Times.Once);
-        mockLoan.VerifySet(x => x.State = LoanState.RETURNED, Times.Once);
-    }
-
-[Fact]
-public void TestRegisterReturn_WhenArticleOnLoanBooked_ThenUpdatesBooking()
-{
-    var loanId = Guid.NewGuid();
-    var mockLoan = new Mock<Loan>();
-    var mockArticle = new Mock<Article>();
-    var mockBooking = new Mock<Booking>();
-
-    _loanDaoMock.Setup(x => x.FindById(loanId)).Returns(mockLoan.Object);
-    mockLoan.Setup(x => x.State).Returns(LoanState.ACTIVE);
-    mockLoan.Setup(x => x.ArticleOnLoan).Returns(mockArticle.Object);
-    mockArticle.Setup(x => x.State).Returns(ArticleState.ONLOANBOOKED);
-    _bookingDaoMock.Setup(x => x.SearchBookings(null, mockArticle.Object, 0, 1)).Returns([mockBooking.Object]);
-
-    var bookingEndDate = DateTime.MinValue;
-    mockBooking.SetupSet(x => x.BookingEndDate = It.IsAny<DateTime>())
-               .Callback<DateTime>(date => bookingEndDate = date);
-
-    _loanController.RegisterReturn(loanId);
-
-    mockArticle.VerifySet(x => x.State = ArticleState.BOOKED, Times.Once);
-    mockLoan.VerifySet(x => x.State = LoanState.RETURNED, Times.Once);
-    
-    bookingEndDate.Date.Should().Be(_today.AddDays(3).Date);
-}
-
-
-    [Fact]
-    public void TestGetLoanInfo_WhenLoanDoesNotExist_ThrowsLoanDoesNotExistException()
-    {
-        _loanDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns((Loan)null!);
-
-        Action act = () => _loanController.GetLoanInfo(Guid.NewGuid());
-
-        act.Should().Throw<LoanDoesNotExistException>().WithMessage("Specified Loan not registered in the system!");
-    }
-
-    [Theory]
-    [InlineData(LoanState.RETURNED)]
-    [InlineData(LoanState.OVERDUE)]
-    public void TestGetLoanInfo_WhenLoanNotActive_DoesNotCallValidateState(LoanState state)
-    {
-        var mockLoan = new Mock<Loan>();
-        var mockArticle = new Mock<Article>();
-        var mockUser = new Mock<User>();
-
-        mockArticle.Setup(x => x.Id).Returns(Guid.NewGuid());
-        mockUser.Setup(x => x.Id).Returns(Guid.NewGuid());
-
-        mockLoan.Setup(x => x.ArticleOnLoan).Returns(mockArticle.Object);
-        mockLoan.Setup(x => x.LoaningUser).Returns(mockUser.Object);
-        mockLoan.Setup(x => x.State).Returns(state);
-        _loanDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns(mockLoan.Object);
-
-        _loanController.GetLoanInfo(Guid.NewGuid());
-
-        mockLoan.Verify(x => x.ValidateState(), Times.Never);
-    }
-
-    [Fact]
-    public void TestGetLoanInfo_WhenLoanActive_ThenCallsValidateState()
-    {
-        var mockLoan = new Mock<Loan>();
-        var mockArticle = new Mock<Article>();
-        var mockUser = new Mock<User>();
-
-        mockArticle.Setup(x => x.Id).Returns(Guid.NewGuid());
-        mockUser.Setup(x => x.Id).Returns(Guid.NewGuid());
-
-        mockLoan.Setup(x => x.ArticleOnLoan).Returns(mockArticle.Object);
-        mockLoan.Setup(x => x.LoaningUser).Returns(mockUser.Object);
-        mockLoan.Setup(x => x.State).Returns(LoanState.ACTIVE);
-        _loanDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns(mockLoan.Object);
-
-        _loanController.GetLoanInfo(Guid.NewGuid());
-
-        mockLoan.Verify(x => x.ValidateState(), Times.Once);
-    }
-
-    [Fact]
-    public void TestGetLoanInfo_ReturnsCorrectDTO()
-    {
-        var mockLoan = new Mock<Loan>();
-        var mockArticle = new Mock<Article>();
-        var mockUser = new Mock<User>();
-
-        mockArticle.Setup(x => x.Id).Returns(Guid.NewGuid());
-        mockArticle.Setup(x => x.Title).Returns("a title");
-
-        mockUser.Setup(x => x.Id).Returns(Guid.NewGuid());
-
-        mockLoan.Setup(x => x.Id).Returns(Guid.NewGuid());
-        mockLoan.Setup(x => x.State).Returns(LoanState.ACTIVE);
-        mockLoan.Setup(x => x.ArticleOnLoan).Returns(mockArticle.Object);
-        mockLoan.Setup(x => x.LoaningUser).Returns(mockUser.Object);
-        mockLoan.Setup(x => x.LoanDate).Returns(_today);
-        mockLoan.Setup(x => x.DueDate).Returns(_today.AddMonths(1));
-        mockLoan.Setup(x => x.Renewed).Returns(true);
-        _loanDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns(mockLoan.Object);
-
-        var loanDTO = _loanController.GetLoanInfo(Guid.NewGuid());
-
-        loanDTO.Should().NotBeNull();
-        loanDTO.Id.Should().Be(mockLoan.Object.Id);
-        loanDTO.State.Should().Be(mockLoan.Object.State);
-        loanDTO.ArticleId.Should().Be(mockLoan.Object.ArticleOnLoan!.Id);
-        loanDTO.ArticleTitle.Should().Be(mockLoan.Object.ArticleOnLoan.Title);
-        loanDTO.LoaningUserId.Should().Be(mockLoan.Object.LoaningUser!.Id);
-        loanDTO.LoanDate.Should().Be(mockLoan.Object.LoanDate);
-        loanDTO.DueDate.Should().Be(mockLoan.Object.DueDate);
-        loanDTO.Renewed.Should().Be(mockLoan.Object.Renewed);
-    }
-
-    [Fact]
-    public void TestGetLoansByUser_WhenUserDoesNotExist_ThrowsUserDoesNotExistException()
-    {
-        _userDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns((User)null!);
-
-        Action act = () => _loanController.GetLoansByUser(Guid.NewGuid(), 0, 0);
-
-        act.Should().Throw<UserDoesNotExistException>().WithMessage("Specified user is not registered in the system!");
-    }
-
-    [Fact]
-    public void TestGetLoansByUser_WhenUserHasNoLoans_ThrowsLoanDoesNotExistException()
-    {
-        var mockUser = new Mock<User>();
-        _userDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns(mockUser.Object);
-        _loanDaoMock.Setup(x => x.SearchLoans(mockUser.Object, null, 0, 0)).Returns([]);
-
-        Action act = () => _loanController.GetLoansByUser(Guid.NewGuid(), 0, 0);
-
-        act.Should().Throw<LoanDoesNotExistException>().WithMessage("No loans relative to the specified user found!");
-    }
-
-    [Fact]
-    public void TestGetLoansByUser_WhenUserHasLoans_ValidatesOnlyActiveLoans()
-    {
-        var mockUser = new Mock<User>();
-        var activeLoan = new Mock<Loan>();
-        var overdueLoan = new Mock<Loan>();
-        var returnedLoan = new Mock<Loan>();
-
-        _userDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns(mockUser.Object);
-        _loanDaoMock.Setup(x => x.SearchLoans(mockUser.Object, null, 0, 0)).Returns([activeLoan.Object, overdueLoan.Object, returnedLoan.Object]);
-        activeLoan.Setup(x => x.State).Returns(LoanState.ACTIVE);
-        overdueLoan.Setup(x => x.State).Returns(LoanState.OVERDUE);
-        returnedLoan.Setup(x => x.State).Returns(LoanState.RETURNED);
-
-        var returnedLoans = _loanController.GetLoansByUser(Guid.NewGuid(), 0, 0);
-
-        returnedLoans.Should().NotBeNull();
-        returnedLoans.Count.Should().Be(3);
-        activeLoan.Verify(x => x.ValidateState(), Times.Once);
-        overdueLoan.Verify(x => x.ValidateState(), Times.Never);
-        returnedLoan.Verify(x => x.ValidateState(), Times.Never);
-    }
-
-    [Fact]
-    public void TestExtendLoan_WhenLoanDoesNotExist_ThrowsLoanDoesNotExistException()
-    {
-        _loanDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns((Loan)null!);
-
-        Action act = () => _loanController.ExtendLoan(Guid.NewGuid());
-
-        act.Should().Throw<LoanDoesNotExistException>().WithMessage("Cannot extend Loan! Loan does not exist!");
-    }
-
-    [Theory]
-    [InlineData(LoanState.RETURNED)]
-    [InlineData(LoanState.OVERDUE)]
-    public void TestExtendLoan_WhenLoanExistsButNotActive_ThrowsInvalidOperationException(LoanState state)
-    {
-        var mockLoanToExtend = new Mock<Loan>();
-
-        _loanDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns(mockLoanToExtend.Object);
-        mockLoanToExtend.Setup(x => x.State).Returns(state);
-        Action act = () => _loanController.ExtendLoan(Guid.NewGuid());
-
-        act.Should().Throw<iLib.src.main.Exceptions.InvalidOperationException>().WithMessage("Cannot extend loan, selected loan is not Active!");
-    }
-    
-    [Fact]
-    public void TestExtendLoan_WhenLoanExistsButBookedByAnotherUser_ThrowsInvalidOperationException()
-    {
-        var mockLoanToExtend = new Mock<Loan>();
-        var mockArticle = new Mock<Article>();
-
-        _loanDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns(mockLoanToExtend.Object);
-        mockLoanToExtend.Setup(x => x.ArticleOnLoan).Returns(mockArticle.Object);
-        mockLoanToExtend.Setup(x => x.State).Returns(LoanState.ACTIVE);
-        mockArticle.Setup(x => x.State).Returns(ArticleState.ONLOANBOOKED);
-
-        Action act = () => _loanController.ExtendLoan(Guid.NewGuid());
-
-        act.Should().Throw<iLib.src.main.Exceptions.InvalidOperationException>().WithMessage("Cannot extend loan, another User has booked the Article!");
-    }
-
-    [Fact]
-    public void TestExtendLoan_WhenLoanAlreadyRenewed_ThrowsInvalidOperationException()
-    {
-        var mockLoanToExtend = new Mock<Loan>();
-        var mockArticle = new Mock<Article>();
-
-        _loanDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns(mockLoanToExtend.Object);
-        mockLoanToExtend.Setup(x => x.ArticleOnLoan).Returns(mockArticle.Object);
-        mockLoanToExtend.Setup(x => x.Renewed).Returns(true);
-        mockLoanToExtend.Setup(x => x.State).Returns(LoanState.ACTIVE);
-        mockArticle.Setup(x => x.State).Returns(ArticleState.ONLOAN);
-
-        Action act = () => _loanController.ExtendLoan(Guid.NewGuid());
-
-        act.Should().Throw<iLib.src.main.Exceptions.InvalidOperationException>().WithMessage("Cannot extend loan, loan has already been renewed!");
-    }
-
- [Fact]
-    public void TestExtendLoan_WhenLoanExistsAndNotBookedByAnotherUser_UpdatesDueDateAndSetsRenewedToTrue()
-    {
-        var mockLoanToExtend = new Mock<Loan>();
-        var mockArticle = new Mock<Article>();
-
-        _loanDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns(mockLoanToExtend.Object);
-        mockLoanToExtend.Setup(x => x.ArticleOnLoan).Returns(mockArticle.Object);
-        mockLoanToExtend.Setup(x => x.State).Returns(LoanState.ACTIVE);
-        mockArticle.Setup(x => x.State).Returns(ArticleState.ONLOAN);
-
-        DateTime newDueDate = DateTime.MinValue;
-        bool _renewed = false;
-        mockLoanToExtend.SetupSet(x => x.DueDate = It.IsAny<DateTime>())
-                        .Callback<DateTime>(date => newDueDate = date);
-
-        mockLoanToExtend.SetupSet(x => x.Renewed = It.IsAny<bool>())
-                        .Callback<bool>(renewed => _renewed = renewed);
-
-        _loanController.ExtendLoan(Guid.NewGuid());
-
-        newDueDate.Date.Should().Be(_today.AddMonths(1).Date);
-        _renewed.Should().BeTrue();
-    }
-
-
-    [Fact]
-    public void TestCountLoansByUser_WhenUserDoesNotExist_ThrowsUserDoesNotExistException()
-    {
-        _userDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns((User)null!);
-
-        Action act = () => _loanController.CountLoansByUser(Guid.NewGuid());
-
-        act.Should().Throw<UserDoesNotExistException>().WithMessage("Specified user is not registered in the system!");
-    }
-
-    [Fact]
-    public void TestCountLoansByUser_WhenUserExists()
-    {
-        var mockUser = new Mock<User>();
-
-        _userDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns(mockUser.Object);
-
-        _loanController.CountLoansByUser(Guid.NewGuid());
-
-        _loanDaoMock.Verify(x => x.CountLoans(mockUser.Object, null), Times.Once);
-    }
-}

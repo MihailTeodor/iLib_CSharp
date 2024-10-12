@@ -1,116 +1,140 @@
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
 using iLib.src.main.DTO;
 using iLib.src.main.Exceptions;
-using iLib.src.main.IControllers;
-using iLib.src.main.IDAO;
+using iLib.src.main.IServices;
 using iLib.src.main.Model;
-using iLib.src.main.Utils;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 
-namespace iLib.src.main.Controllers
+namespace iLib.src.main.services
 {
-    public class UserController(IUserDao userDao, IBookingController bookingController, ILoanController loanController) : IUserController
+    [Route("usersEndpoint")]
+    [ApiController]
+    public class UserController(IUserService userService) : ControllerBase
     {
-        private readonly IUserDao _userDao = userDao;
-        private readonly IBookingController _bookingController = bookingController;
-        private readonly ILoanController _loanController = loanController;
+        private readonly IUserService _userService = userService;
 
-        public Guid AddUser(UserDTO userDTO)
+        [HttpGet("{id}")]
+        [Authorize]
+        public IActionResult GetUserInfo(Guid id)
         {
-            User? tmpUser;
+            var loggedUserId = User.FindFirstValue(JwtRegisteredClaimNames.Sub);
+            var loggedUserRole = User.FindFirstValue(ClaimTypes.Role);
+            
+            if (loggedUserRole != UserRole.ADMINISTRATOR.ToString() && loggedUserId != id.ToString())
+            {
+                return Forbid();
+            }
+
             try
             {
-                tmpUser = _userDao.FindUserByEmail(userDTO.Email);
+                var userDto = _userService.GetUserInfoExtended(id);
+                return Ok(userDto);
+            }
+            catch (UserDoesNotExistException ex)
+            {
+                return NotFound(new { error = ex.Message });
             }
             catch (Exception)
             {
-                tmpUser = null;
+                return StatusCode(500, new { error = "An error occurred while retrieving the user information." });
             }
-            if (tmpUser != null)
-                throw new ArgumentException("Email already registered!");
-
-            if (string.IsNullOrWhiteSpace(userDTO.PlainPassword))
-                throw new ArgumentException("Password is required!");
-
-            var userToAdd = userDTO.ToEntity();
-            userToAdd.Role = UserRole.CITIZEN;
-
-            _userDao.Save(userToAdd);
-
-            return userToAdd.Id;
         }
 
-        public void UpdateUser(Guid id, UserDTO userDTO)
+        [HttpPost]
+        [Authorize(Roles = "ADMINISTRATOR")]
+        public IActionResult CreateUser([FromBody] UserDTO userDTO)
         {
-            var userToUpdate = _userDao.FindById(id) ?? throw new UserDoesNotExistException("User does not exist!");
-            if (!string.IsNullOrWhiteSpace(userDTO.PlainPassword))
-                userToUpdate.Password = PasswordUtils.HashPassword(userDTO.PlainPassword);
-
-            userToUpdate.Email = userDTO.Email;
-            userToUpdate.Name = userDTO.Name;
-            userToUpdate.Surname = userDTO.Surname;
-            userToUpdate.Address = userDTO.Address;
-            userToUpdate.TelephoneNumber = userDTO.TelephoneNumber;
-
-            _userDao.Save(userToUpdate);
-        }
-
-        public IList<User> SearchUsers(string? email, string? name, string? surname, string? telephoneNumber, int fromIndex, int limit)
-        {
-            IList<User> retrievedUsers = [];
             try
             {
-                if (!string.IsNullOrWhiteSpace(email))
+                var id = _userService.AddUser(userDTO);
+                return Created("", new { userId = id });
+            }
+            catch (ArgumentException e)
+            {
+                return BadRequest(new { error = e.Message });
+            }
+            catch (Exception)
+            {
+                return StatusCode(500, new { error = "An error occurred while registering the user." });
+            }
+        }
+
+        [HttpPut("{id}")]
+        [Authorize]
+        public IActionResult UpdateUser(Guid id, [FromBody] UserDTO userDTO)
+        {
+            var loggedUserId = User.FindFirstValue(JwtRegisteredClaimNames.Sub);
+            var loggedUserRole = User.FindFirstValue(ClaimTypes.Role);
+
+            if (loggedUserRole != UserRole.ADMINISTRATOR.ToString() && loggedUserId != id.ToString())
+            {
+                return Forbid();
+            }
+
+            try
+            {
+                _userService.UpdateUser(id, userDTO);
+                return Ok(new { message = "User updated successfully." });
+            }
+            catch (UserDoesNotExistException e)
+            {
+                return NotFound(new { error = e.Message });
+            }
+            catch (Exception)
+            {
+                return StatusCode(500, new { error = "An error occurred while updating the user." });
+            }
+        }
+
+        [HttpGet]
+        [Authorize(Roles = "ADMINISTRATOR")]
+        public IActionResult SearchUsers([FromQuery] string? email,
+                                        [FromQuery] string? name,
+                                        [FromQuery] string? surname,
+                                        [FromQuery] string? telephoneNumber,
+                                        [FromQuery] int pageNumber = 1,
+                                        [FromQuery] int resultsPerPage = 10)
+        {
+            if (pageNumber < 1 || resultsPerPage < 0)
+            {
+                return BadRequest(new { error = "Pagination parameters incorrect!" });
+            }
+
+            try
+            {
+                long totalResults = _userService.CountUsers(email, name, surname, telephoneNumber);
+                int totalPages = (int)Math.Ceiling((double)totalResults / resultsPerPage);
+
+                if (pageNumber > totalPages)
                 {
-                    var user = _userDao.FindUserByEmail(email);
-                    if (user != null)
-                    {
-                        retrievedUsers.Add(user);
-                    }
+                    pageNumber = totalPages == 0 ? 1 : totalPages;
                 }
-                else
-                {
-                    retrievedUsers = _userDao.FindUsers(name, surname, telephoneNumber, fromIndex, limit);
-                }
+
+                int fromIndex = (pageNumber - 1) * resultsPerPage;
+                var userDTOs = _userService.SearchUsers(email, name, surname, telephoneNumber, fromIndex, resultsPerPage)
+                                             .Select(user => new UserDTO(user))
+                                             .ToList<UserDTO?>();
+
+                var response = new PaginationResponse<UserDTO>(
+                    userDTOs,
+                    pageNumber,
+                    resultsPerPage,
+                    totalResults,
+                    totalPages
+                );
+
+                return Ok(response);
+            }
+            catch (SearchHasGivenNoResultsException e)
+            {
+                return NotFound(new { error = e.Message });
             }
             catch (Exception)
             {
-                retrievedUsers = [];
+                return StatusCode(500, new { error = "An error occurred during user search." });
             }
-            if (!retrievedUsers.Any())
-                throw new SearchHasGivenNoResultsException("Search has given no results!");
-            return retrievedUsers;
-        }
-
-        public long CountUsers(string? email, string? name, string? surname, string? telephoneNumber)
-        {
-            return string.IsNullOrWhiteSpace(email) ? _userDao.CountUsers(name, surname, telephoneNumber) : 1;
-        }
-
-        public UserDashboardDTO GetUserInfoExtended(Guid id)
-        {
-            var user = _userDao.FindById(id) ?? throw new UserDoesNotExistException("User does not exist!");
-            List<Booking>? bookings;
-            try
-            {
-                bookings = _bookingController.GetBookingsByUser(user.Id, 0, 5).ToList();
-            }
-            catch (Exception)
-            {
-                bookings = null;
-            }
-
-            List<Loan>? loans;
-            try
-            {
-                loans = _loanController.GetLoansByUser(user.Id, 0, 5).ToList();
-            }
-            catch (Exception)
-            {
-                loans = null;
-            }
-
-            var totalBookings = _bookingController.CountBookingsByUser(user.Id);
-            var totalLoans = _loanController.CountLoansByUser(user.Id);
-            return new UserDashboardDTO(user, bookings, loans, totalBookings, totalLoans);
         }
     }
 }

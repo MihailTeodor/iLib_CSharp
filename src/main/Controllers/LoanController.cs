@@ -1,135 +1,182 @@
-using iLib.src.main.IDAO;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using iLib.src.main.DTO;
 using iLib.src.main.Exceptions;
+using iLib.src.main.IServices;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
 using iLib.src.main.Model;
-using iLib.src.main.IControllers;
 
-namespace iLib.src.main.Controllers
+namespace iLib.src.main.services
 {
-    public class LoanController(IUserDao userDao, IArticleDao articleDao, ILoanDao loanDao, IBookingDao bookingDao) : ILoanController
+    [Route("loansEndpoint")]
+    [ApiController]
+    public class LoanController(ILoanService loanService) : ControllerBase
     {
-        private readonly IUserDao _userDao = userDao;
-        private readonly IArticleDao _articleDao = articleDao;
-        private readonly ILoanDao _loanDao = loanDao;
-        private readonly IBookingDao _bookingDao = bookingDao;
-        private readonly DateTime _today = DateTime.Now;
+        private readonly ILoanService _loanService = loanService;
 
-        public Guid RegisterLoan(Guid userId, Guid articleId)
+        [HttpPost]
+        [Consumes("application/json")]
+        [Produces("application/json")]
+        [Authorize(Roles = "ADMINISTRATOR")]
+        public IActionResult RegisterLoan([FromQuery] Guid userId, [FromQuery] Guid articleId)
         {
-            var loaningUser = _userDao.FindById(userId);
-            var loanedArticle = _articleDao.FindById(articleId);
+            if (userId == Guid.Empty)
+                return BadRequest(new { error = "Cannot register Loan, User not specified!" });
+            if (articleId == Guid.Empty)
+                return BadRequest(new { error = "Cannot register Loan, Article not specified!" });
 
-            if (loaningUser == null)
-                throw new UserDoesNotExistException("Cannot register Loan, specified User not present in the system!");
-            if (loanedArticle == null)
-                throw new ArticleDoesNotExistException("Cannot register Loan, specified Article not present in catalogue!");
-
-            Loan loanToRegister;
-
-            switch (loanedArticle.State)
+            try
             {
-                case ArticleState.BOOKED:
-                    var bookings = _bookingDao.SearchBookings(null, loanedArticle, 0, 1);
-                    if (bookings.First().BookingUser != loaningUser)
-                        throw new Exceptions.InvalidOperationException("Cannot register Loan, specified Article is booked by another user!");
-                    bookings.First().State = BookingState.COMPLETED;
-                    break;
-                case ArticleState.ONLOAN:
-                case ArticleState.ONLOANBOOKED:
-                    throw new Exceptions.InvalidOperationException("Cannot register Loan, specified Article is already on loan!");
-                case ArticleState.UNAVAILABLE:
-                    throw new Exceptions.InvalidOperationException("Cannot register Loan, specified Article is UNAVAILABLE!");
+                var loanId = _loanService.RegisterLoan(userId, articleId);
+                return Created("", new { loanId });
             }
-
-            loanToRegister = ModelFactory.CreateLoan();
-            loanToRegister.ArticleOnLoan = loanedArticle;
-            loanToRegister.LoaningUser = loaningUser;
-            loanToRegister.LoanDate = _today;
-            loanToRegister.DueDate = _today.AddMonths(1);
-            loanToRegister.Renewed = false;
-
-            loanedArticle.State = ArticleState.ONLOAN;
-            loanToRegister.State = LoanState.ACTIVE;
-
-            _loanDao.Save(loanToRegister);
-
-            return loanToRegister.Id;
-        }
-
-        public void RegisterReturn(Guid loanId)
-        {
-            var loanToReturn = _loanDao.FindById(loanId) ?? throw new LoanDoesNotExistException("Cannot return article! Loan not registered!");
-            if (loanToReturn.State == LoanState.RETURNED)
-                throw new Exceptions.InvalidOperationException("Cannot return article! Loan has already been returned!");
-
-            var loanArticle = loanToReturn.ArticleOnLoan;
-
-            switch (loanArticle?.State)
+            catch (UserDoesNotExistException ex)
             {
-                case ArticleState.ONLOAN:
-                case ArticleState.UNAVAILABLE:
-                    loanArticle.State = ArticleState.AVAILABLE;
-                    break;
-                case ArticleState.ONLOANBOOKED:
-                    loanArticle.State = ArticleState.BOOKED;
-                    var booking = _bookingDao.SearchBookings(null, loanArticle, 0, 1).First();
-                    booking.BookingEndDate = _today.AddDays(3);
-                    break;
+                return NotFound(new { error = ex.Message });
             }
-
-            loanToReturn.State = LoanState.RETURNED;
-
-            _loanDao.Save(loanToReturn);
-        }
-
-        public LoanDTO GetLoanInfo(Guid loanId)
-        {
-            var loan = _loanDao.FindById(loanId) ?? throw new LoanDoesNotExistException("Specified Loan not registered in the system!");
-            if (loan.State == LoanState.ACTIVE)
-                loan.ValidateState();
-                _loanDao.Save(loan);
-
-            return new LoanDTO(loan);
-        }
-
-        public IList<Loan> GetLoansByUser(Guid userId, int fromIndex, int limit)
-        {
-            var user = _userDao.FindById(userId) ?? throw new UserDoesNotExistException("Specified user is not registered in the system!");
-            var userLoans = _loanDao.SearchLoans(user, null, fromIndex, limit);
-
-            if (!userLoans.Any())
-                throw new LoanDoesNotExistException("No loans relative to the specified user found!");
-
-            foreach (var loan in userLoans)
+            catch (ArticleDoesNotExistException ex)
             {
-                if (loan.State == LoanState.ACTIVE)
-                    loan.ValidateState();
-                    _loanDao.Save(loan);
+                return NotFound(new { error = ex.Message });
             }
-
-            return userLoans;
+            catch (Exceptions.InvalidOperationException ex)
+            {
+                return BadRequest(new { error = ex.Message });
+            }
+            catch (Exception)
+            {
+                return StatusCode(500, new { error = "An error occurred while registering the loan." });
+            }
         }
 
-        public void ExtendLoan(Guid loanId)
+        [HttpPatch("{loanId}/return")]
+        [Produces("application/json")]
+        [Authorize(Roles = "ADMINISTRATOR")]
+        public IActionResult RegisterReturn(Guid loanId)
         {
-            var loanToExtend = _loanDao.FindById(loanId) ?? throw new LoanDoesNotExistException("Cannot extend Loan! Loan does not exist!");
-            if (loanToExtend.State != LoanState.ACTIVE)
-                throw new Exceptions.InvalidOperationException("Cannot extend loan, selected loan is not Active!");
-            if (loanToExtend.ArticleOnLoan!.State == ArticleState.ONLOANBOOKED)
-                throw new Exceptions.InvalidOperationException("Cannot extend loan, another User has booked the Article!");
-            if (loanToExtend.Renewed)
-                throw new Exceptions.InvalidOperationException("Cannot extend loan, loan has already been renewed!");
-            else {
-                loanToExtend.DueDate = _today.AddMonths(1);
-                loanToExtend.Renewed = true;
+            try
+            {
+                _loanService.RegisterReturn(loanId);
+                return Ok(new { message = "Loan successfully returned." });
             }
-            _loanDao.Save(loanToExtend);
+            catch (LoanDoesNotExistException ex)
+            {
+                return NotFound(new { error = ex.Message });
+            }
+            catch (Exceptions.InvalidOperationException ex)
+            {
+                return BadRequest(new { error = ex.Message });
+            }
+            catch (Exception)
+            {
+                return StatusCode(500, new { error = "An error occurred while returning the loan." });
+            }
         }
 
-        public long CountLoansByUser(Guid userId)
+        [HttpGet("{loanId}")]
+        [Produces("application/json")]
+        public IActionResult GetLoanInfo(Guid loanId)
         {
-            var user = _userDao.FindById(userId) ?? throw new UserDoesNotExistException("Specified user is not registered in the system!");
-            return _loanDao.CountLoans(user, null);
+            try
+            {
+                var loanDTO = _loanService.GetLoanInfo(loanId);
+                return Ok(loanDTO);
+            }
+            catch (LoanDoesNotExistException ex)
+            {
+                return NotFound(new { error = ex.Message });
+            }
+            catch (Exception)
+            {
+                return StatusCode(500, new { error = "An unexpected error occurred while retrieving the loan information." });
+            }
+        }
+
+        [HttpGet("{userId}/loans")]
+        [Produces("application/json")]
+        [Authorize]
+        public IActionResult GetLoansByUser(Guid userId, [FromQuery] int pageNumber = 1, [FromQuery] int resultsPerPage = 10)
+        {
+            if (pageNumber < 1 || resultsPerPage < 0)
+            {
+                return BadRequest(new { error = "Pagination parameters incorrect!" });
+            }
+
+            var loggedUserId = User.FindFirstValue(JwtRegisteredClaimNames.Sub);
+            if (User.FindFirstValue(ClaimTypes.Role) != UserRole.ADMINISTRATOR.ToString() && loggedUserId != userId.ToString())
+            {
+                return Unauthorized();
+            }
+
+            try
+            {
+                long totalResults = _loanService.CountLoansByUser(userId);
+                int totalPages = (int)Math.Ceiling((double)totalResults / resultsPerPage);
+
+                if (pageNumber > totalPages)
+                {
+                    pageNumber = totalPages == 0 ? 1 : totalPages;
+                }
+
+                int fromIndex = (pageNumber - 1) * resultsPerPage;
+
+                var loansDTOs = _loanService.GetLoansByUser(userId, fromIndex, resultsPerPage)
+                                               .Select(loan => new LoanDTO(loan))
+                                               .ToList<LoanDTO?>();
+
+                var response = new PaginationResponse<LoanDTO>(
+                    loansDTOs,
+                    pageNumber,
+                    resultsPerPage,
+                    totalResults,
+                    totalPages
+                );
+
+                return Ok(response);
+            }
+            catch (UserDoesNotExistException ex)
+            {
+                return NotFound(new { error = ex.Message });
+            }
+            catch (LoanDoesNotExistException ex)
+            {
+                return NotFound(new { error = ex.Message });
+            }
+            catch (Exception)
+            {
+                return StatusCode(500, new { error = "An unexpected error occurred while retrieving user loans." });
+            }
+        }
+
+        [HttpPatch("{loanId}/extend")]
+        [Produces("application/json")]
+        [Authorize]
+        public IActionResult ExtendLoan(Guid loanId)
+        {
+            var loggedUserId = User.FindFirstValue(JwtRegisteredClaimNames.Sub);
+
+            try
+            {
+                var loaningUserId = _loanService.GetLoanInfo(loanId).LoaningUserId;
+                if (User.FindFirstValue(ClaimTypes.Role) != UserRole.ADMINISTRATOR.ToString() && loggedUserId != loaningUserId.ToString())
+                {
+                    return Unauthorized();
+                }
+                _loanService.ExtendLoan(loanId);
+                return Ok(new { message = "Loan extended successfully." });
+            }
+            catch (LoanDoesNotExistException ex)
+            {
+                return NotFound(new { error = ex.Message });
+            }
+            catch (Exceptions.InvalidOperationException ex)
+            {
+                return BadRequest(new { error = ex.Message });
+            }
+            catch (Exception)
+            {
+                return StatusCode(500, new { error = "An unexpected error occurred." });
+            }
         }
     }
 }
