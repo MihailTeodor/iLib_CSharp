@@ -40,6 +40,5 @@ namespace iLib.src.main.DTO
         public BookingDTO? BookingDTO{ get; set; }
         public LoanDTO? LoanDTO{ get; set; }
         public ArticleDTO() { }
-
     }
 }

@@ -1,8 +1,9 @@
+
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using iLib.src.main.DTO;
 using iLib.src.main.Exceptions;
-using iLib.src.main.IServices;
+using iLib.src.main.IControllers;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using iLib.src.main.Model;
@@ -11,9 +12,9 @@ namespace iLib.src.main.services
 {
     [Route("bookingsEndpoint")]
     [ApiController]
-    public class BookingController(IBookingService bookingService) : ControllerBase
+    public class BookingEndpoint(IBookingController bookingController) : ControllerBase
     {
-        private readonly IBookingService _bookingService = bookingService;
+        private readonly IBookingController _bookingController = bookingController;
 
         [HttpPost]
         [Consumes("application/json")]
@@ -35,7 +36,7 @@ namespace iLib.src.main.services
 
             try
             {
-                var bookingId = _bookingService.RegisterBooking(userId, articleId);
+                var bookingId = _bookingController.RegisterBooking(userId, articleId);
                 return Created("", new { bookingId });
             }
             catch (UserDoesNotExistException ex)
@@ -62,7 +63,7 @@ namespace iLib.src.main.services
         {
             try
             {
-                var bookingDTO = _bookingService.GetBookingInfo(bookingId);
+                var bookingDTO = _bookingController.GetBookingInfo(bookingId);
                 return Ok(bookingDTO);
             }
             catch (BookingDoesNotExistException ex)
@@ -84,14 +85,14 @@ namespace iLib.src.main.services
 
             try
             {
-                var bookingUserId = _bookingService.GetBookingInfo(bookingId).BookingUserId;
+                var bookingUserId = _bookingController.GetBookingInfo(bookingId).BookingUserId;
 
                 if (User.FindFirstValue(ClaimTypes.Role) != UserRole.ADMINISTRATOR.ToString() && loggedUserId != bookingUserId.ToString())
                 {
                     return Unauthorized();
                 }
 
-                _bookingService.CancelBooking(bookingId);
+                _bookingController.CancelBooking(bookingId);
                 return Ok(new { message = "Booking cancelled successfully." });
             }
             catch (BookingDoesNotExistException ex)
@@ -126,7 +127,7 @@ namespace iLib.src.main.services
 
             try
             {
-                long totalResults = _bookingService.CountBookingsByUser(userId);
+                long totalResults = _bookingController.CountBookingsByUser(userId);
                 int totalPages = (int)Math.Ceiling((double)totalResults / resultsPerPage);
 
                 if (pageNumber > totalPages)
@@ -140,7 +141,7 @@ namespace iLib.src.main.services
                     return BadRequest(new { error = "For strange reasons the fromIndex parameter is negative!" });
                 }
 
-                var bookingDTOs = _bookingService.GetBookingsByUser(userId, fromIndex, resultsPerPage)
+                var bookingDTOs = _bookingController.GetBookingsByUser(userId, fromIndex, resultsPerPage)
                                                     .Select(booking => new BookingDTO(booking))
                                                     .ToList<BookingDTO?>();
 

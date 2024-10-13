@@ -5,7 +5,7 @@ using iLib.src.main.Model;
 using iLib.src.main.Utils;
 
 [Collection("Endpoints Tests")]
-public class LoanControllerTest
+public class LoanEndpointTest
 {
     private readonly NHibernate.ISession _session;
     private User? adminUser;
@@ -13,7 +13,7 @@ public class LoanControllerTest
     private string? adminToken;
     private string? citizenToken;
 
-    public LoanControllerTest()
+    public LoanEndpointTest()
     {
         _session = NHibernateHelper.OpenSession();
     }
@@ -563,3 +563,4 @@ public class LoanControllerTest
         Assert.Equal("Cannot extend loan, another User has booked the Article!", content["error"]!.ToString());
     }
 }
+
