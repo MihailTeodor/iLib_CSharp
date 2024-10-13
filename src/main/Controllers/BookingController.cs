@@ -1,99 +1,171 @@
-using iLib.src.main.IDAO;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using iLib.src.main.DTO;
 using iLib.src.main.Exceptions;
+using iLib.src.main.IServices;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
 using iLib.src.main.Model;
-using iLib.src.main.IControllers;
 
-namespace iLib.src.main.Controllers
+namespace iLib.src.main.services
 {
-    public class BookingController(IBookingDao bookingDao, IUserDao userDao, IArticleDao articleDao) : IBookingController
+    [Route("bookingsEndpoint")]
+    [ApiController]
+    public class BookingController(IBookingService bookingService) : ControllerBase
     {
-        private readonly IBookingDao _bookingDao = bookingDao;
-        private readonly IUserDao _userDao = userDao;
-        private readonly IArticleDao _articleDao = articleDao;
-        private readonly DateTime _today = DateTime.Now;
+        private readonly IBookingService _bookingService = bookingService;
 
-        public Guid RegisterBooking(Guid userId, Guid articleId)
+        [HttpPost]
+        [Consumes("application/json")]
+        [Produces("application/json")]
+        [Authorize]
+        public IActionResult RegisterBooking([FromQuery] Guid userId, [FromQuery] Guid articleId)
         {
-            var bookingUser = _userDao.FindById(userId);
-            var bookedArticle = _articleDao.FindById(articleId);
+            if (userId == Guid.Empty)
+                return BadRequest(new { error = "Cannot register Booking, User not specified!" });
+            if (articleId == Guid.Empty)
+                return BadRequest(new { error = "Cannot register Booking, Article not specified!" });
 
-            if (bookingUser == null)
-                throw new UserDoesNotExistException("Cannot register Booking, specified User not present in the system!");
+            var loggedUserId = User.FindFirstValue(JwtRegisteredClaimNames.Sub);
 
-            if (bookedArticle == null)
-                throw new ArticleDoesNotExistException("Cannot register Booking, specified Article not present in catalogue!");
-
-            var bookingToRegister = ModelFactory.CreateBooking();
-
-            switch (bookedArticle.State)
+            if (User.FindFirstValue(ClaimTypes.Role) != UserRole.ADMINISTRATOR.ToString() && loggedUserId != userId.ToString())
             {
-                case ArticleState.BOOKED:
-                case ArticleState.ONLOANBOOKED:
-                    throw new Exceptions.InvalidOperationException("Cannot register Booking, specified Article is already booked!");
-                case ArticleState.UNAVAILABLE:
-                    throw new Exceptions.InvalidOperationException("Cannot register Booking, specified Article is UNAVAILABLE!");
-                case ArticleState.AVAILABLE:
-                    bookingToRegister.BookingEndDate = _today.AddDays(3);
-                    bookedArticle.State = ArticleState.BOOKED;
-                    break;
-                case ArticleState.ONLOAN:
-                    bookedArticle.State = ArticleState.ONLOANBOOKED;
-                    break;
+                return Unauthorized();
             }
 
-            bookingToRegister.BookingUser = bookingUser;
-            bookingToRegister.BookedArticle = bookedArticle;
-            bookingToRegister.BookingDate = _today;
-            bookingToRegister.State = BookingState.ACTIVE;
-
-            _bookingDao.Save(bookingToRegister);
-
-            return bookingToRegister.Id;
-        }
-
-        public BookingDTO GetBookingInfo(Guid bookingId)
-        {
-            var booking = _bookingDao.FindById(bookingId) ?? throw new BookingDoesNotExistException("Specified Booking not registered in the system!");
-            if (booking.State == BookingState.ACTIVE)
-                booking.ValidateState();
-
-            return new BookingDTO(booking);
-        }
-
-        public void CancelBooking(Guid bookingId)
-        {
-            var bookingToCancel = _bookingDao.FindById(bookingId) ?? throw new BookingDoesNotExistException("Cannot cancel Booking. Specified Booking not registered in the system!");
-            if (bookingToCancel.State != BookingState.ACTIVE)
-                throw new Exceptions.InvalidOperationException("Cannot cancel Booking. Specified Booking is not active!");
-
-            if (bookingToCancel.BookedArticle != null)
-                bookingToCancel.BookedArticle.State = ArticleState.AVAILABLE;
-            
-            bookingToCancel.State = BookingState.CANCELLED;
-        }
-
-        public IList<Booking> GetBookingsByUser(Guid userId, int fromIndex, int limit)
-        {
-            var user = _userDao.FindById(userId) ?? throw new UserDoesNotExistException("Specified user is not registered in the system!");
-            var userBookings = _bookingDao.SearchBookings(user, null, fromIndex, limit);
-
-            if (!userBookings.Any())
-                throw new SearchHasGivenNoResultsException("No bookings relative to the specified user found!");
-
-            foreach (var booking in userBookings)
+            try
             {
-                if (booking.State == BookingState.ACTIVE)
-                    booking.ValidateState();
+                var bookingId = _bookingService.RegisterBooking(userId, articleId);
+                return Created("", new { bookingId });
+            }
+            catch (UserDoesNotExistException ex)
+            {
+                return NotFound(new { error = ex.Message });
+            }
+            catch (ArticleDoesNotExistException ex)
+            {
+                return NotFound(new { error = ex.Message });
+            }
+            catch (Exceptions.InvalidOperationException ex)
+            {
+                return BadRequest(new { error = ex.Message });
+            }
+            catch (Exception)
+            {
+                return StatusCode(500, new { error = "An error occurred while registering the booking." });
+            }
+        }
+
+        [HttpGet("{bookingId}")]
+        [Produces("application/json")]
+        public IActionResult GetBookingInfo(Guid bookingId)
+        {
+            try
+            {
+                var bookingDTO = _bookingService.GetBookingInfo(bookingId);
+                return Ok(bookingDTO);
+            }
+            catch (BookingDoesNotExistException ex)
+            {
+                return NotFound(new { error = ex.Message });
+            }
+            catch (Exception)
+            {
+                return StatusCode(500, new { error = "An error occurred while retrieving the booking information." });
+            }
+        }
+
+        [HttpPatch("{bookingId}/cancel")]
+        [Produces("application/json")]
+        [Authorize]
+        public IActionResult CancelBooking(Guid bookingId)
+        {
+            var loggedUserId = User.FindFirstValue(JwtRegisteredClaimNames.Sub);
+
+            try
+            {
+                var bookingUserId = _bookingService.GetBookingInfo(bookingId).BookingUserId;
+
+                if (User.FindFirstValue(ClaimTypes.Role) != UserRole.ADMINISTRATOR.ToString() && loggedUserId != bookingUserId.ToString())
+                {
+                    return Unauthorized();
+                }
+
+                _bookingService.CancelBooking(bookingId);
+                return Ok(new { message = "Booking cancelled successfully." });
+            }
+            catch (BookingDoesNotExistException ex)
+            {
+                return NotFound(new { error = ex.Message });
+            }
+            catch (Exceptions.InvalidOperationException ex)
+            {
+                return BadRequest(new { error = ex.Message });
+            }
+            catch (Exception)
+            {
+                return StatusCode(500, new { error = "An error occurred while attempting to cancel the booking." });
+            }
+        }
+
+        [HttpGet("{userId}/bookings")]
+        [Produces("application/json")]
+        [Authorize]
+        public IActionResult GetBookedArticlesByUser(Guid userId, [FromQuery] int pageNumber = 1, [FromQuery] int resultsPerPage = 10)
+        {
+            if (pageNumber < 1 || resultsPerPage < 0)
+            {
+                return BadRequest(new { error = "Pagination parameters incorrect!" });
             }
 
-            return userBookings;
-        }
+            var loggedUserId = User.FindFirstValue(JwtRegisteredClaimNames.Sub);
+            if (User.FindFirstValue(ClaimTypes.Role) != UserRole.ADMINISTRATOR.ToString() && loggedUserId != userId.ToString())
+            {
+                return Unauthorized();
+            }
 
-        public long CountBookingsByUser(Guid userId)
-        {
-            var user = _userDao.FindById(userId) ?? throw new UserDoesNotExistException("Specified user is not registered in the system!");
-            return _bookingDao.CountBookings(user, null);
+            try
+            {
+                long totalResults = _bookingService.CountBookingsByUser(userId);
+                int totalPages = (int)Math.Ceiling((double)totalResults / resultsPerPage);
+
+                if (pageNumber > totalPages)
+                {
+                    pageNumber = totalPages == 0 ? 1 : totalPages;
+                }
+
+                int fromIndex = (pageNumber - 1) * resultsPerPage;
+                if (fromIndex < 0)
+                {
+                    return BadRequest(new { error = "For strange reasons the fromIndex parameter is negative!" });
+                }
+
+                var bookingDTOs = _bookingService.GetBookingsByUser(userId, fromIndex, resultsPerPage)
+                                                    .Select(booking => new BookingDTO(booking))
+                                                    .ToList<BookingDTO?>();
+
+                var response = new PaginationResponse<BookingDTO>(
+                    bookingDTOs,
+                    pageNumber,
+                    resultsPerPage,
+                    totalResults,
+                    totalPages
+                );
+
+                return Ok(response);
+            }
+            catch (UserDoesNotExistException ex)
+            {
+                return NotFound(new { error = ex.Message });
+            }
+            catch (SearchHasGivenNoResultsException ex)
+            {
+                return NotFound(new { error = ex.Message });
+            }
+            catch (Exception)
+            {
+                return StatusCode(500, new { error = "An error occurred while retrieving user bookings." });
+            }
         }
     }
 }

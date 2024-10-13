@@ -20,10 +20,10 @@ public class ArticleDTOTest
         book.Description = "description";
         book.State = ArticleState.AVAILABLE;
 
-        var loanDueDate = new DateTime(2024, 2, 1);
-        var bookingEndDate = new DateTime(2024, 3, 1);
+        var bookingDTO = new BookingDTO();
+        var loanDTO = new LoanDTO();
 
-        var dto = ArticleMapper.ToDTO(book, loanDueDate, bookingEndDate);
+        var dto = ArticleMapper.ToDTO(book, loanDTO, bookingDTO);
 
         dto.Should().NotBeNull();
         dto!.Title.Should().Be("title");
@@ -36,8 +36,8 @@ public class ArticleDTOTest
         dto.YearEdition.Should().Be(yearEdition);
         dto.Description.Should().Be("description");
         dto.State.Should().Be(ArticleState.AVAILABLE);
-        dto.LoanDueDate.Should().Be(loanDueDate);
-        dto.BookingEndDate.Should().Be(bookingEndDate);
+        dto.LoanDTO.Should().Be(loanDTO);
+        dto.BookingDTO.Should().Be(bookingDTO);
     }
 
     [Fact]
@@ -55,10 +55,10 @@ public class ArticleDTOTest
         magazine.Description = "description";
         magazine.State = ArticleState.AVAILABLE;
 
-        var loanDueDate = new DateTime(2024, 2, 1);
-        var bookingEndDate = new DateTime(2024, 3, 1);
+        var bookingDTO = new BookingDTO();
+        var loanDTO = new LoanDTO();
 
-        var dto = ArticleMapper.ToDTO(magazine, loanDueDate, bookingEndDate);
+        var dto = ArticleMapper.ToDTO(magazine, loanDTO, bookingDTO);
 
         dto.Should().NotBeNull();
         dto!.IssueNumber.Should().Be(1);
@@ -71,8 +71,8 @@ public class ArticleDTOTest
         dto.YearEdition.Should().Be(yearEdition);
         dto.Description.Should().Be("description");
         dto.State.Should().Be(ArticleState.AVAILABLE);
-        dto.LoanDueDate.Should().Be(loanDueDate);
-        dto.BookingEndDate.Should().Be(bookingEndDate);
+        dto.LoanDTO.Should().Be(loanDTO);
+        dto.BookingDTO.Should().Be(bookingDTO);
     }
 
     [Fact]
@@ -90,10 +90,10 @@ public class ArticleDTOTest
         movieDVD.Description = "description";
         movieDVD.State = ArticleState.AVAILABLE;
 
-        var loanDueDate = new DateTime(2024, 2, 1);
-        var bookingEndDate = new DateTime(2024, 3, 1);
+        var bookingDTO = new BookingDTO();
+        var loanDTO = new LoanDTO();
 
-        var dto = ArticleMapper.ToDTO(movieDVD, loanDueDate, bookingEndDate);
+        var dto = ArticleMapper.ToDTO(movieDVD, loanDTO, bookingDTO);
 
         dto.Should().NotBeNull();
         dto!.Director.Should().Be("director");
@@ -106,8 +106,8 @@ public class ArticleDTOTest
         dto.YearEdition.Should().Be(yearEdition);
         dto.Description.Should().Be("description");
         dto.State.Should().Be(ArticleState.AVAILABLE);
-        dto.LoanDueDate.Should().Be(loanDueDate);
-        dto.BookingEndDate.Should().Be(bookingEndDate);
+        dto.LoanDTO.Should().Be(loanDTO);
+        dto.BookingDTO.Should().Be(bookingDTO);
     }
 
     [Fact]

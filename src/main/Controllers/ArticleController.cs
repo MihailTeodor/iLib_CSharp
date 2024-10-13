@@ -1,190 +1,167 @@
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using iLib.src.main.DTO;
 using iLib.src.main.Exceptions;
-using iLib.src.main.IControllers;
-using iLib.src.main.IDAO;
-using iLib.src.main.Model;
+using iLib.src.main.IServices;
 
-namespace iLib.src.main.Controllers
+namespace iLib.src.main.services
 {
-    public class ArticleController(IArticleDao articleDao, IBookDao bookDao, IMagazineDao magazineDao, IMovieDVDDao movieDVDDao, IBookingDao bookingDao, ILoanDao loanDao) : IArticleController
+    [Route("articlesEndpoint")]
+    [ApiController]
+    public class ArticleController(IArticleService articleService) : ControllerBase
     {
-        private readonly IArticleDao _articleDao = articleDao;
-        private readonly IBookDao _bookDao = bookDao;
-        private readonly IMagazineDao _magazineDao = magazineDao;
-        private readonly IMovieDVDDao _movieDVDDao = movieDVDDao;
-        private readonly IBookingDao _bookingDao = bookingDao;
-        private readonly ILoanDao _loanDao = loanDao;
+        private readonly IArticleService _articleService = articleService;
 
-        public Guid AddArticle(ArticleDTO articleDTO)
+        [HttpPost]
+        [Consumes("application/json")]
+        [Produces("application/json")]
+        [Authorize(Roles = "ADMINISTRATOR")]
+        public IActionResult CreateArticle([FromBody] ArticleDTO articleDTO)
         {
-            var articleToAdd = ArticleMapper.ToEntity(articleDTO);
-            articleToAdd.State = ArticleState.AVAILABLE;
-            _articleDao.Save(articleToAdd);
-            return articleToAdd.Id;
+            try
+            {
+                Guid id = _articleService.AddArticle(articleDTO);
+                return Created("", new { articleId = id });
+            }
+            catch (ArgumentException e)
+            {
+                return BadRequest(new { error = e.Message });
+            }
+            catch (Exception)
+            {
+                return StatusCode(500, new { error = "An error occurred while registering the article." });
+            }
         }
 
-        public void UpdateArticle(Guid id, ArticleDTO articleDTO)
+        [HttpPut("{articleId}")]
+        [Consumes("application/json")]
+        [Produces("application/json")]
+        [Authorize(Roles = "ADMINISTRATOR")]
+        public IActionResult UpdateArticle(Guid articleId, [FromBody] ArticleDTO articleDTO)
         {
-            var articleToUpdate = _articleDao.FindById(id) ?? throw new ArticleDoesNotExistException("Article does not exist!");
-            switch (articleDTO.Type)
+            try
             {
-                case ArticleType.BOOK:
-                    if (articleToUpdate is not Book book)
-                        throw new ArgumentException("Cannot change type of Article");
-                    if (articleDTO.Isbn == null)
-                        throw new ArgumentException("Article identifier is required");
-                    if (articleDTO.Author == null)
-                        throw new ArgumentException("Author is required!");
-                    book.Isbn = articleDTO.Isbn;
-                    book.Author = articleDTO.Author;
-                    break;
-                case ArticleType.MAGAZINE:
-                    if (articleToUpdate is not Magazine magazine)
-                        throw new ArgumentException("Cannot change type of Article");
-                    if (articleDTO.Issn == null)
-                        throw new ArgumentException("Article identifier is required");
-                    if (articleDTO.IssueNumber == null)
-                        throw new ArgumentException("Issue number is required!");
-                    magazine.Issn = articleDTO.Issn;
-                    magazine.IssueNumber = articleDTO.IssueNumber.Value;
-                    break;
-                case ArticleType.MOVIEDVD:
-                    if (articleToUpdate is not MovieDVD movieDVD)
-                        throw new ArgumentException("Cannot change type of Article");
-                    if (articleDTO.Isan == null)
-                        throw new ArgumentException("Article identifier is required");
-                    if (articleDTO.Director == null)
-                        throw new ArgumentException("Director is required!");
-                    movieDVD.Isan = articleDTO.Isan;
-                    movieDVD.Director = articleDTO.Director;
-                    break;
-                default:
-                    throw new ArgumentException("Invalid article type");
+                _articleService.UpdateArticle(articleId, articleDTO);
+                return Ok(new { message = "Article updated successfully." });
             }
-
-            articleToUpdate.Title = articleDTO.Title;
-            articleToUpdate.Genre = articleDTO.Genre;
-            articleToUpdate.Description = articleDTO.Description;
-            articleToUpdate.Publisher = articleDTO.Publisher;
-            articleToUpdate.YearEdition = articleDTO.YearEdition;
-            articleToUpdate.Location = articleDTO.Location;
-
-            if ((articleToUpdate.State == ArticleState.UNAVAILABLE && articleDTO.State == ArticleState.AVAILABLE)
-                || (articleToUpdate.State == ArticleState.AVAILABLE && articleDTO.State == ArticleState.UNAVAILABLE))
+            catch (ArticleDoesNotExistException ex)
             {
-                articleToUpdate.State = (ArticleState)articleDTO.State;
+                return NotFound(new { error = ex.Message });
             }
-            else if (articleDTO.State != null && articleToUpdate.State != articleDTO.State)
+            catch (InvalidStateTransitionException ex)
             {
-                throw new InvalidStateTransitionException("Cannot change state to inserted value!");
+                return BadRequest(new { error = ex.Message });
             }
-
-            _articleDao.Save(articleToUpdate);
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { error = ex.Message });
+            }
+            catch (Exception)
+            {
+                return StatusCode(500, new { error = "An error occurred while updating the article." });
+            }
         }
 
-        public IList<Article> SearchArticles(string? isbn, string? issn, string? isan, string? title, string? genre,
-            string? publisher, DateTime? yearEdition, string? author, int? issueNumber, string? director, int fromIndex, int limit)
+        [HttpGet("{articleId}")]
+        [Produces("application/json")]
+        public IActionResult GetArticleInfo(Guid articleId)
         {
-            IList<Article> retrievedArticles = [];
-
-            if (!string.IsNullOrEmpty(isbn))
+            try
             {
-                retrievedArticles = _bookDao.FindBooksByIsbn(isbn).Cast<Article>().ToList();
+                var articleDTO = _articleService.GetArticleInfoExtended(articleId);
+                return Ok(articleDTO);
             }
-            else if (!string.IsNullOrEmpty(issn))
+            catch (ArticleDoesNotExistException e)
             {
-                retrievedArticles = _magazineDao.FindMagazinesByIssn(issn).Cast<Article>().ToList();
+                return NotFound(new { error = e.Message });
             }
-            else if (!string.IsNullOrEmpty(isan))
-            { 
-                retrievedArticles = _movieDVDDao.FindMoviesByIsan(isan).Cast<Article>().ToList();
-            }
-            else
+            catch (Exception)
             {
-                retrievedArticles = [.. _articleDao.FindArticles(title, genre, publisher, yearEdition, author, issueNumber, director, fromIndex, limit)];
+                return StatusCode(500, new { error = "An error occurred while retrieving the article information." });
             }
-
-            if (!retrievedArticles.Any())
-                throw new SearchHasGivenNoResultsException("The search has given 0 results!");
-
-            return retrievedArticles;
         }
 
-        public long CountArticles(string? isbn, string? issn, string? isan, string? title, string? genre, string? publisher,
-            DateTime? yearEdition, string? author, int? issueNumber, string? director)
+        [HttpGet]
+        [Produces("application/json")]
+        public IActionResult SearchArticles([FromQuery] string? isbn, [FromQuery] string? issn, [FromQuery] string? isan, [FromQuery] string? title, [FromQuery] string? genre, [FromQuery] string? publisher, [FromQuery] string? yearEdition, [FromQuery] string? author, [FromQuery] int? issueNumber, [FromQuery] string? director, [FromQuery] int pageNumber = 1, [FromQuery] int resultsPerPage = 10)
         {
-            long count = 0;
-
-            if (!string.IsNullOrEmpty(isbn))
+            if (pageNumber < 1 || resultsPerPage < 0)
             {
-                count = _bookDao.CountBooksByIsbn(isbn);
-            }
-            else if (!string.IsNullOrEmpty(issn))
-            {
-                count = _magazineDao.CountMagazinesByIssn(issn);
-            }
-            else if (!string.IsNullOrEmpty(isan))
-            {
-                count = _movieDVDDao.CountMoviesByIsan(isan);
-            }
-            else
-            {
-                count = _articleDao.CountArticles(title, genre, publisher, yearEdition, author, issueNumber, director);
+                return BadRequest(new { error = "Pagination parameters incorrect!" });
             }
 
-            return count;
+            DateTime? _yearEdition = null;
+            if (yearEdition != null)
+            {
+                if (!DateTime.TryParse(yearEdition, out DateTime parsedDate))
+                {
+                    return BadRequest(new { error = "Invalid date format for 'yearEdition', expected format YYYY-MM-DD." });
+                }
+                _yearEdition = parsedDate;
+            }
+
+            try
+            {
+                long totalResults = _articleService.CountArticles(isbn, issn, isan, title, genre, publisher, _yearEdition, author, issueNumber, director);
+                int totalPages = (int)Math.Ceiling((double)totalResults / resultsPerPage);
+
+                if (pageNumber > totalPages)
+                {
+                    pageNumber = totalPages == 0 ? 1 : totalPages;
+                }
+
+                int fromIndex = (pageNumber - 1) * resultsPerPage;
+                if (fromIndex < 0)
+                {
+                    return BadRequest(new { error = "For strange reasons the fromIndex parameter is negative!" });
+                }
+
+                var articleDTOs = _articleService.SearchArticles(isbn, issn, isan, title, genre, publisher, _yearEdition, author, issueNumber, director, fromIndex, resultsPerPage)
+                    .Select(article => ArticleMapper.ToDTO(article, null, null))
+                    .ToList();
+
+                var response = new PaginationResponse<ArticleDTO>(
+                    articleDTOs,
+                    pageNumber,
+                    resultsPerPage,
+                    totalResults,
+                    totalPages
+                );
+
+                return Ok(response);
+            }
+            catch (SearchHasGivenNoResultsException e)
+            {
+                return NotFound(new { error = e.Message });
+            }
+            catch (Exception e)
+            {
+                return StatusCode(500, new { error = "An error occurred during article search. " + e.Message });
+            }
         }
 
-        public void RemoveArticle(Guid articleId)
+        [HttpDelete("{articleId}")]
+        [Produces("application/json")]
+        [Authorize(Roles = "ADMINISTRATOR")]
+        public IActionResult DeleteArticle(Guid articleId)
         {
-            var articleToRemove = _articleDao.FindById(articleId) ?? throw new ArticleDoesNotExistException("Cannot remove Article! Article not in catalogue!");
-            switch (articleToRemove.State)
+            try
             {
-                case ArticleState.ONLOAN:
-                case ArticleState.ONLOANBOOKED:
-                    throw new Exceptions.InvalidOperationException("Cannot remove Article from catalogue! Article currently on loan!");
-                case ArticleState.BOOKED:
-                    var retrievedBookings = _bookingDao.SearchBookings(null, articleToRemove, 0, 1);
-                    if (retrievedBookings.FirstOrDefault()?.State != BookingState.ACTIVE)
-                        throw new Exceptions.InvalidOperationException("Cannot remove Article from catalogue! Inconsistent state!");
-                    retrievedBookings.First().State = BookingState.CANCELLED;
-                    break;
-                default:
-                    break;
+                _articleService.RemoveArticle(articleId);
+                return Ok(new { message = "Article deleted successfully." });
             }
-
-            _articleDao.Delete(articleToRemove);
-        }
-
-        public ArticleDTO? GetArticleInfoExtended(Guid articleId)
-        {
-            var article = _articleDao.FindById(articleId) ?? throw new ArticleDoesNotExistException("Article does not exist!");
-            List<Loan>? loans;
-            DateTime? loanDueDate = null;
-            DateTime? bookingEndDate = null;
-
-            switch (article.State)
+            catch (ArticleDoesNotExistException ex)
             {
-                case ArticleState.BOOKED:
-                    var bookings = _bookingDao.SearchBookings(null, article, 0, 1);
-                    bookings.First().ValidateState();
-                    bookingEndDate = bookings.First().BookingEndDate;
-                    break;
-                case ArticleState.ONLOAN:
-                case ArticleState.ONLOANBOOKED:
-
-                    loans = _loanDao.SearchLoans(null, article, 0, 1)?.ToList();
-                    if (loans != null && loans.Count != 0)
-                    {
-                        loans.First().ValidateState();
-                        loanDueDate = loans.First().DueDate;
-                    }
-                    break;
-                default:
-                    break;
+                return NotFound(new { error = ex.Message });
             }
-
-            return ArticleMapper.ToDTO(article, loanDueDate, bookingEndDate);
+            catch (Exceptions.InvalidOperationException ex)
+            {
+                return BadRequest(new { error = ex.Message });
+            }
+            catch (Exception)
+            {
+                return StatusCode(500, new { error = "An error occurred during article deletion." });
+            }
         }
     }
 }

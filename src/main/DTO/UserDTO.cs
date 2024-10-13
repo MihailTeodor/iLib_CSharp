@@ -43,7 +43,7 @@ namespace iLib.src.main.DTO
         {
             var user = ModelFactory.CreateUser();
 
-            if (!string.IsNullOrEmpty(PlainPassword))
+            if (!string.IsNullOrWhiteSpace(PlainPassword))
             {
                 user.Password = PasswordUtils.HashPassword(PlainPassword);
             }

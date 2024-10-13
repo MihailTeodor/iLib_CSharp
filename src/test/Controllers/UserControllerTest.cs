@@ -1,223 +1,552 @@
-using Moq;
 using Xunit;
-using iLib.src.main.Controllers;
-using iLib.src.main.DTO;
-using iLib.src.main.Exceptions;
-using iLib.src.main.IDAO;
+using RestSharp;
+using Newtonsoft.Json.Linq;
+using iLib.src.main.Utils;
 using iLib.src.main.Model;
-using FluentAssertions;
-using iLib.src.main.IControllers;
+using iLib.src.main.DTO;
 
+[Collection("Endpoints Tests")]
 public class UserControllerTest
 {
-    private readonly UserController _userController;
-    private readonly Mock<IUserDao> _userDaoMock;
-    private readonly Mock<IBookingController> _bookingControllerMock;
-    private readonly Mock<ILoanController> _loanControllerMock;
-    private readonly Mock<User> _userMock;
+    private readonly NHibernate.ISession _session;
+    private User? adminUser;
+    private User? citizenUser;
+    private string? adminToken;
+    private string? citizenToken;
 
     public UserControllerTest()
     {
-        _userDaoMock = new Mock<IUserDao>();
-        _bookingControllerMock = new Mock<IBookingController>();
-        _loanControllerMock = new Mock<ILoanController>();
-        _userMock = new Mock<User>();
+        Environment.SetEnvironmentVariable("DATABASE_NAME", "iLib_C#_test");
 
-        _userController = new UserController(_userDaoMock.Object, _bookingControllerMock.Object, _loanControllerMock.Object);
+        _session = NHibernateHelper.OpenSession();
+    }
+
+    private async Task InitializeDatabase()
+    {
+        await QueryUtils.TruncateAllTables(_session);
+        adminUser = await QueryUtils.CreateUser(_session, Guid.NewGuid(), "admin@example.com", "admin password", "adminName", "adminSurname", "adminAddress", "adminTelephoneNumber", UserRole.ADMINISTRATOR);
+        adminToken = await AuthHelper.GetAuthToken("admin@example.com", "admin password");
+
+        citizenUser = await QueryUtils.CreateUser(_session, Guid.NewGuid(), "user@Email.com", "user password", "name", "surname", "address", "123432", UserRole.CITIZEN);
+        citizenToken = await AuthHelper.GetAuthToken("user@Email.com", "user password");
+    }
+
+[Fact]
+public async Task TestGetUser_WhereRequestingUserIsAdmin_CanRequestInfo()
+{
+    await InitializeDatabase();
+
+    var book = await QueryUtils.CreateBook(_session, Guid.NewGuid(), "upstairs", "cujo", DateTime.Now, "publisher", "horror", "a nice book", ArticleState.BOOKED, "King", "isbn");
+    var booking = await QueryUtils.CreateBooking(_session, Guid.NewGuid(), DateTime.Now, DateTime.Now.AddDays(3), BookingState.ACTIVE, book, citizenUser!);
+
+    var client = new RestClient("http://localhost:5062/ilib/v1/usersEndpoint");
+    var request = new RestRequest("/{id}");
+    request.AddHeader("Authorization", "Bearer " + adminToken);
+    request.AddHeader("Content-type", "application/json");
+    request.AddParameter("id", citizenUser!.Id, ParameterType.UrlSegment);
+
+    var response = await client.ExecuteGetAsync(request);
+    var content = JObject.Parse(response.Content!);
+
+    Assert.Equal(200, (int)response.StatusCode);
+    Assert.Equal(citizenUser.Id.ToString(), content["id"]!.ToString());
+    Assert.Equal(citizenUser.Email, content["email"]!.ToString());
+    Assert.Equal(citizenUser.Name, content["name"]!.ToString());
+    Assert.Equal(citizenUser.Surname, content["surname"]!.ToString());
+    Assert.Equal(citizenUser.Address, content["address"]!.ToString());
+    Assert.Equal(citizenUser.TelephoneNumber, content["telephoneNumber"]!.ToString());
+
+    var bookingsArray = content["bookings"] as JArray;
+    Assert.NotNull(bookingsArray);
+    Assert.Single(bookingsArray);
+
+    var bookingObject = bookingsArray.First as JObject;
+    Assert.Equal(booking.Id.ToString(), bookingObject!["id"]!.ToString());
+    Assert.Equal(booking.BookedArticle!.Id.ToString(), bookingObject["bookedArticleId"]!.ToString());
+    Assert.Equal(booking.BookedArticle.Title, bookingObject["bookedArticleTitle"]!.ToString());
+    Assert.Equal(booking.BookingUser!.Id.ToString(), bookingObject["bookingUserId"]!.ToString());
+    
+    Assert.Equal(booking.State.ToString(), bookingObject["state"]!.ToString());
+
+    var bookingDateResponse = bookingObject["bookingDate"]!.ToObject<DateTime>();
+    Assert.Equal(booking.BookingDate.Date, bookingDateResponse.Date);
+
+    var bookingEndDateResponse = bookingObject["bookingEndDate"]!.ToObject<DateTime>();
+    Assert.Equal(booking.BookingEndDate.Date, bookingEndDateResponse.Date);
+
+    var loansArray = content["loans"] as JArray;
+    Assert.Null(loansArray);
+
+    Assert.Equal(1, content["totalBookings"]);
+    Assert.Equal(0, content["totalLoans"]);
+}
+
+
+
+[Fact]
+public async Task TestGetUser_WhereRequestingUserIsSameUser_CanRequestInfo()
+{
+    await InitializeDatabase();
+
+    var book = await QueryUtils.CreateBook(_session, Guid.NewGuid(), "upstairs", "cujo", DateTime.Now, "publisher", "horror", "a nice book", ArticleState.BOOKED, "King", "isbn");
+    var booking = await QueryUtils.CreateBooking(_session, Guid.NewGuid(), DateTime.Now, DateTime.Now.AddDays(3), BookingState.ACTIVE, book, citizenUser!);
+
+    var client = new RestClient("http://localhost:5062/ilib/v1/usersEndpoint");
+    var request = new RestRequest("/{id}");
+    request.AddHeader("Authorization", "Bearer " + citizenToken);
+    request.AddHeader("Content-type", "application/json");
+    request.AddParameter("id", citizenUser!.Id, ParameterType.UrlSegment);
+
+    var response = await client.ExecuteGetAsync(request);
+
+    Assert.Equal(200, (int)response.StatusCode);
+
+    var content = JObject.Parse(response.Content!);
+
+    Assert.Equal(citizenUser.Id.ToString(), content["id"]!.ToString());
+    Assert.Equal(citizenUser.Email, content["email"]!.ToString());
+    Assert.Equal(citizenUser.Name, content["name"]!.ToString());
+    Assert.Equal(citizenUser.Surname, content["surname"]!.ToString());
+    Assert.Equal(citizenUser.Address, content["address"]!.ToString());
+    Assert.Equal(citizenUser.TelephoneNumber, content["telephoneNumber"]!.ToString());
+
+    var bookingsArray = content["bookings"] as JArray;
+    Assert.NotNull(bookingsArray);
+    Assert.Single(bookingsArray);
+
+    var bookingObject = bookingsArray.First as JObject;
+    Assert.Equal(booking.Id.ToString(), bookingObject!["id"]!.ToString());
+    Assert.Equal(booking.BookedArticle!.Id.ToString(), bookingObject["bookedArticleId"]!.ToString());
+    Assert.Equal(booking.BookedArticle.Title, bookingObject["bookedArticleTitle"]!.ToString());
+    Assert.Equal(booking.BookingUser!.Id.ToString(), bookingObject["bookingUserId"]!.ToString());
+
+    Assert.Equal(booking.State.ToString(), bookingObject["state"]!.ToString());
+
+    var bookingDateResponse = bookingObject["bookingDate"]!.ToObject<DateTime>();
+    Assert.Equal(booking.BookingDate.Date, bookingDateResponse.Date);
+
+    var bookingEndDateResponse = bookingObject["bookingEndDate"]!.ToObject<DateTime>();
+    Assert.Equal(booking.BookingEndDate.Date, bookingEndDateResponse.Date);
+
+    var loansArray = content["loans"] as JArray;
+    Assert.Null(loansArray);
+
+    Assert.Equal(1, content["totalBookings"]);
+    Assert.Equal(0, content["totalLoans"]);
+}
+
+
+
+    [Fact]
+    public async Task TestGetUserInfo_WhenUserNotAdminAndDifferentId_ReturnsUnauthorizedResponse()
+    {
+        await InitializeDatabase();
+
+        var client = new RestClient("http://localhost:5062/ilib/v1/usersEndpoint");
+        var request = new RestRequest("/{id}");
+        request.AddHeader("Authorization", "Bearer " + citizenToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddParameter("id", Guid.NewGuid(), ParameterType.UrlSegment);
+
+        var response = await client.ExecuteGetAsync(request);
+        Assert.Equal(403, (int)response.StatusCode);
     }
 
     [Fact]
-    public void TestAddUser_WhenEmailAlreadyRegistered_ThrowsArgumentException()
+    public async Task TestGetUserInfo_WhenRequestedUserDoesNotExist_ReturnsNotFoundResponse()
     {
-        var userDTO = new Mock<UserDTO>().Object;
-        _userDaoMock.Setup(x => x.FindUserByEmail(It.IsAny<string>())).Returns(_userMock.Object);
+        await InitializeDatabase();
 
-        Action act = () => _userController.AddUser(userDTO);
+        var client = new RestClient("http://localhost:5062/ilib/v1/usersEndpoint");
+        var request = new RestRequest("/{id}");
+        request.AddHeader("Authorization", "Bearer " + adminToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddParameter("id", Guid.NewGuid(), ParameterType.UrlSegment);
 
-        act.Should().Throw<ArgumentException>().WithMessage("Email already registered!");
+        var response = await client.ExecuteGetAsync(request);
+        var content = response.Content;
+
+        Assert.Equal(404, (int)response.StatusCode);
+        Assert.Contains("User does not exist!", content);
     }
 
     [Fact]
-    public void TestAddUser_WhenPasswordMissing_ThrowsArgumentException()
+    public async Task TestCreateUser_WhenRoleIsNotAdministrator_ReturnsForbiddenResponse()
     {
-        var userDTO = new Mock<UserDTO>().Object;
-        _userDaoMock.Setup(x => x.FindUserByEmail(It.IsAny<string>())).Returns((User)null!);
+        await InitializeDatabase();
 
-        Action act = () => _userController.AddUser(userDTO);
+        var client = new RestClient("http://localhost:5062/ilib/v1/usersEndpoint");
+        var request = new RestRequest("");
+        request.AddHeader("Authorization", "Bearer " + citizenToken);
+        request.AddHeader("Content-type", "application/json");
 
-        act.Should().Throw<ArgumentException>().WithMessage("Password is required!");
+        var response = await client.ExecutePostAsync(request);
+        Assert.Equal(403, (int)response.StatusCode);
     }
 
     [Fact]
-    public void TestAddUser_Successful()
+    public async Task TestCreateUser_WhenRoleIsAdministrator()
     {
-        _userDaoMock.Setup(x => x.FindUserByEmail(It.IsAny<string>())).Returns((User)null!);
+        await InitializeDatabase();
 
         var userDTO = new UserDTO
         {
-            Name = "name",
-            Surname = "surname",
-            Email = "email",
-            PlainPassword = "password",
-            Address = "address",
+            Email = "newuser@example.com",
+            PlainPassword = "password123",
+            Name = "New",
+            Surname = "User",
+            Address = "New Address",
             TelephoneNumber = "1234567890"
         };
 
-        _userController.AddUser(userDTO);
+        var client = new RestClient("http://localhost:5062/ilib/v1/usersEndpoint");
+        var request = new RestRequest("");
+        request.AddHeader("Authorization", "Bearer " + adminToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddJsonBody(userDTO);
 
-        var userCaptor = new Mock<User>();
-        _userDaoMock.Verify(x => x.Save(It.IsAny<User>()), Times.Once);
+        var response = await client.ExecutePostAsync(request);
+        var content = JObject.Parse(response.Content!);
+
+        Assert.Equal(201, (int)response.StatusCode);
+        Assert.True(content.ContainsKey("userId"));
     }
 
     [Fact]
-    public void TestUpdateUser_WhenUserDoesNotExist_ThrowsUserDoesNotExistException()
+    public async Task TestCreateUser_WhenEmailAlreadyExists_ReturnsBadRequestResponse()
     {
-        var userDTO = new UserDTO();
-        _userDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns((User)null!);
+        await InitializeDatabase();
 
-        Action act = () => _userController.UpdateUser(Guid.NewGuid(), userDTO);
-
-        act.Should().Throw<UserDoesNotExistException>().WithMessage("User does not exist!");
-    }
-
-    [Fact]
-    public void TestUpdateUser_WhenUserExists()
-    {
         var userDTO = new UserDTO
         {
-            Email = "new email",
-            PlainPassword = "new plain password",
-            Name = "new name",
-            Surname = "new surname",
-            Address = "new address",
+            Email = "user@Email.com",
+            PlainPassword = "password123",
+            Name = "New",
+            Surname = "User",
+            Address = "New Address",
+            TelephoneNumber = "1234567890"
+        };
+
+        var client = new RestClient("http://localhost:5062/ilib/v1/usersEndpoint");
+        var request = new RestRequest("");
+        request.AddHeader("Authorization", "Bearer " + adminToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddJsonBody(userDTO);
+
+        var response = await client.ExecutePostAsync(request);
+        var content = JObject.Parse(response.Content!);
+
+        Assert.Equal(400, (int)response.StatusCode);
+        Assert.Equal("Email already registered!", content["error"]!.ToString());
+    }
+
+    [Theory]
+    [MemberData(nameof(ProvideInvalidUserData))]
+    public async Task TestCreateUser_InvalidData(UserDTO userDTO, string expectedErrorMessage)
+    {
+        await InitializeDatabase();
+
+        var client = new RestClient("http://localhost:5062/ilib/v1/usersEndpoint");
+        var request = new RestRequest("");
+        request.AddHeader("Authorization", "Bearer " + adminToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddJsonBody(userDTO);
+
+        var response = await client.ExecutePostAsync(request);
+        var content = response.Content;
+
+        Assert.Equal(400, (int)response.StatusCode);
+        Assert.Contains(expectedErrorMessage, content);
+    }
+
+    [Fact]
+    public async Task TestCreateUser_MissingPassword()
+    {
+        await InitializeDatabase();
+
+        var userDTO = new UserDTO
+        {
+            Email = "email@asd.com",
+            Name = "name",
+            Surname = "surname",
+            TelephoneNumber = "1234567890"
+        };
+
+        var client = new RestClient("http://localhost:5062/ilib/v1/usersEndpoint");
+        var request = new RestRequest("");
+        request.AddHeader("Authorization", "Bearer " + adminToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddJsonBody(userDTO);
+
+        var response = await client.ExecutePostAsync(request);
+        var content = JObject.Parse(response.Content!);
+
+        Assert.Equal(400, (int)response.StatusCode);
+        Assert.Contains("Password is required!", content["error"]!.ToString());
+    }
+
+    [Fact]
+    public async Task TestUpdateUser_Success()
+    {
+        await InitializeDatabase();
+
+        var userDTO = new UserDTO
+        {
+            Email = "updateduser@example.com",
+            PlainPassword = "newpassword123",
+            Name = "Updated",
+            Surname = "User",
+            Address = "Updated Address",
             TelephoneNumber = "0987654321"
         };
 
-        var existingUser = new Mock<User>();
-        _userDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns(existingUser.Object);
+        var client = new RestClient("http://localhost:5062/ilib/v1/usersEndpoint");
+        var request = new RestRequest("/{id}");
+        request.AddHeader("Authorization", "Bearer " + adminToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddParameter("id", citizenUser!.Id, ParameterType.UrlSegment);
+        request.AddJsonBody(userDTO);
 
-        _userController.UpdateUser(Guid.NewGuid(), userDTO);
+        var response = await client.ExecutePutAsync(request);
+        var content = JObject.Parse(response.Content!);
 
-        _userDaoMock.Verify(x => x.Save(existingUser.Object), Times.Once);
-        existingUser.VerifySet(x => x.Email = userDTO.Email);
-        existingUser.VerifySet(x => x.Name = userDTO.Name);
-        existingUser.VerifySet(x => x.Surname = userDTO.Surname);
-        existingUser.VerifySet(x => x.Address = userDTO.Address);
-        existingUser.VerifySet(x => x.TelephoneNumber = userDTO.TelephoneNumber);
-        existingUser.VerifySet(x => x.Password = It.IsAny<string>());
+        Assert.Equal(200, (int)response.StatusCode);
+        Assert.Equal("User updated successfully.", content["message"]!.ToString());
     }
 
     [Fact]
-    public void TestSearchUsers_WhenEmailIsNotNull_PerformsFindUsersByEmail()
+    public async Task TestUpdateUser_Forbidden()
     {
-        _userDaoMock.Setup(x => x.FindUserByEmail(It.IsAny<string>())).Returns(_userMock.Object);
+        await InitializeDatabase();
 
-        _userController.SearchUsers("email", null, null, null, 0, 0);
+        var userDTO = new UserDTO
+        {
+            Email = "updateduser@example.com",
+            PlainPassword = "newpassword123",
+            Name = "Updated",
+            Surname = "User",
+            Address = "Updated Address",
+            TelephoneNumber = "0987654321"
+        };
 
-        _userDaoMock.Verify(x => x.FindUserByEmail("email"), Times.Once);
+        var client = new RestClient("http://localhost:5062/ilib/v1/usersEndpoint");
+        var request = new RestRequest("/{id}");
+        request.AddHeader("Authorization", "Bearer " + citizenToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddParameter("id", adminUser!.Id, ParameterType.UrlSegment);
+        request.AddJsonBody(userDTO);
+
+        var response = await client.ExecutePutAsync(request);
+        Assert.Equal(403, (int)response.StatusCode);
     }
 
     [Fact]
-    public void TestSearchUsers_WhenEmailIsNotNullAndNoResults_ThrowsSearchHasGivenNoResultsException()
+    public async Task TestUpdateUser_UserNotFound()
     {
-        _userDaoMock.Setup(x => x.FindUserByEmail(It.IsAny<string>())).Throws(new Exception());
+        await InitializeDatabase();
 
-        Action act = () => _userController.SearchUsers("non existing email", null, null, null, 0, 0);
+        var userDTO = new UserDTO
+        {
+            Email = "updateduser@example.com",
+            PlainPassword = "newpassword123",
+            Name = "Updated",
+            Surname = "User",
+            Address = "Updated Address",
+            TelephoneNumber = "0987654321"
+        };
 
-        act.Should().Throw<SearchHasGivenNoResultsException>().WithMessage("Search has given no results!");
+        var client = new RestClient("http://localhost:5062/ilib/v1/usersEndpoint");
+        var request = new RestRequest("/{id}");
+        request.AddHeader("Authorization", "Bearer " + adminToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddParameter("id", Guid.NewGuid(), ParameterType.UrlSegment);
+        request.AddJsonBody(userDTO);
+
+        var response = await client.ExecutePutAsync(request);
+        var content = JObject.Parse(response.Content!);
+
+        Assert.Equal(404, (int)response.StatusCode);
+        Assert.Equal("User does not exist!", content["error"]!.ToString());
+    }
+
+    [Theory]
+    [MemberData(nameof(ProvideInvalidUserData))]
+    public async Task TestUpdateUser_InvalidData(UserDTO userDTO, string expectedErrorMessage)
+    {
+        await InitializeDatabase();
+
+        var client = new RestClient("http://localhost:5062/ilib/v1/usersEndpoint");
+        var request = new RestRequest("/{id}");
+        request.AddHeader("Authorization", "Bearer " + adminToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddParameter("id", citizenUser!.Id, ParameterType.UrlSegment);
+        request.AddJsonBody(userDTO);
+
+        var response = await client.ExecutePutAsync(request);
+        var content = response.Content;
+
+        Assert.Equal(400, (int)response.StatusCode);
+        Assert.Contains(expectedErrorMessage, content);
+    }
+
+[Fact]
+public async Task TestSearchUsers_Success()
+{
+    await InitializeDatabase();
+
+    var client = new RestClient("http://localhost:5062/ilib/v1/usersEndpoint");
+    var request = new RestRequest("");
+    request.AddHeader("Authorization", "Bearer " + adminToken);
+    request.AddHeader("Content-type", "application/json");
+    request.AddQueryParameter("email", citizenUser!.Email);
+
+    var response = await client.ExecuteGetAsync(request);
+
+    Assert.Equal(200, (int)response.StatusCode);
+
+    var content = JObject.Parse(response.Content!);
+
+    Assert.True(content.ContainsKey("items"));
+    Assert.Single(content["items"]!);
+    var userObject = content["items"]![0];
+    Assert.Equal(citizenUser.Email, userObject!["email"]!.ToString());
+    Assert.Equal(citizenUser.Name, userObject["name"]!.ToString());
+    Assert.Equal(citizenUser.Surname, userObject["surname"]!.ToString());
+    Assert.Equal(citizenUser.Address, userObject["address"]!.ToString());
+    Assert.Equal(citizenUser.TelephoneNumber, userObject["telephoneNumber"]!.ToString());
+
+    Assert.Equal(1, content["pageNumber"]!.ToObject<int>());
+    Assert.Equal(10, content["resultsPerPage"]!.ToObject<int>());
+    Assert.Equal(1, content["totalResults"]!.ToObject<int>());
+    Assert.Equal(1, content["totalPages"]!.ToObject<int>());
+}
+
+
+    [Fact]
+    public async Task TestSearchUsers_Unauthorized()
+    {
+        await InitializeDatabase();
+
+        var client = new RestClient("http://localhost:5062/ilib/v1/usersEndpoint");
+        var request = new RestRequest("");
+        request.AddHeader("Authorization", "Bearer " + citizenToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddQueryParameter("email", "user@Email.com");
+
+        var response = await client.ExecuteGetAsync(request);
+        Assert.Equal(403, (int)response.StatusCode);
     }
 
     [Fact]
-    public void TestSearchUsers_WhenEmailIsNull_PerformsNormalSearch()
+    public async Task TestSearchUsers_InvalidPaginationParameters()
     {
-        var retrievedUsers = new List<User> { _userMock.Object };
-        _userDaoMock.Setup(x => x.FindUsers(null, null, null, 0, 0)).Returns(retrievedUsers);
+        await InitializeDatabase();
 
-        _userController.SearchUsers(null, null, null, null, 0, 0);
+        var client = new RestClient("http://localhost:5062/ilib/v1/usersEndpoint");
+        var request = new RestRequest("");
+        request.AddHeader("Authorization", "Bearer " + adminToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddQueryParameter("pageNumber", "0");
 
-        _userDaoMock.Verify(x => x.FindUsers(null, null, null, 0, 0), Times.Once);
-        _userDaoMock.Verify(x => x.FindUserByEmail(It.IsAny<string>()), Times.Never);
+        var response = await client.ExecuteGetAsync(request);
+        var content = JObject.Parse(response.Content!);
+
+        Assert.Equal(400, (int)response.StatusCode);
+        Assert.Equal("Pagination parameters incorrect!", content["error"]!.ToString());
     }
 
     [Fact]
-    public void TestSearchUsers_WhenEmailIsNullAndNoResults_ThrowsSearchHasGivenNoResultsException()
+    public async Task TestSearchUsers_NoResults()
     {
-        _userDaoMock.Setup(x => x.FindUsers(null, null, null, 0, 0)).Returns([]);
+        await InitializeDatabase();
 
-        Action act = () => _userController.SearchUsers(null, null, null, null, 0, 0);
+        var client = new RestClient("http://localhost:5062/ilib/v1/usersEndpoint");
+        var request = new RestRequest("");
+        request.AddHeader("Authorization", "Bearer " + adminToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddQueryParameter("email", "nonexistent@Email.com");
 
-        act.Should().Throw<SearchHasGivenNoResultsException>().WithMessage("Search has given no results!");
+        var response = await client.ExecuteGetAsync(request);
+        var content = JObject.Parse(response.Content!);
+
+        Assert.Equal(404, (int)response.StatusCode);
+        Assert.Equal("Search has given no results!", content["error"]!.ToString());
     }
 
     [Fact]
-    public void TestCountUsersWithValidParameters()
+    public async Task TestSearchUsers_MultipleResults()
     {
-        _userController.CountUsers(null, "John", "Snow", "123456789");
+        await InitializeDatabase();
 
-        _userDaoMock.Verify(x => x.CountUsers("John", "Snow", "123456789"), Times.Once);
+        await QueryUtils.CreateUser(_session, Guid.NewGuid(), "user1@Email.com", "user password", "Alice", "Brown", "Address1", "1234321", UserRole.CITIZEN);
+        await QueryUtils.CreateUser(_session, Guid.NewGuid(), "user2@Email.com", "user password", "Bob", "Johnson", "Address2", "1234322", UserRole.CITIZEN);
+        await QueryUtils.CreateUser(_session, Guid.NewGuid(), "user3@Email.com", "user password", "Charlie", "Brown", "Address3", "1234323", UserRole.CITIZEN);
+
+        var client = new RestClient("http://localhost:5062/ilib/v1/usersEndpoint");
+        var request = new RestRequest("");
+        request.AddHeader("Authorization", "Bearer " + adminToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddQueryParameter("surname", "Brown");
+
+        var response = await client.ExecuteGetAsync(request);
+        var content = JObject.Parse(response.Content!);
+
+        Assert.Equal(200, (int)response.StatusCode);
+        Assert.True(content.ContainsKey("items"));
+        var itemsArray = content["items"];
+        Assert.Equal(2, itemsArray!.Count());
+
+        foreach (var userObject in itemsArray!)
+        {
+            Assert.Equal("Brown", userObject["surname"]!.ToString());
+        }
+
+        Assert.Equal(1, content["pageNumber"]!.ToObject<int>());
+        Assert.Equal(10, content["resultsPerPage"]!.ToObject<int>());
+        Assert.Equal(2, content["totalResults"]!.ToObject<int>());
+        Assert.Equal(1, content["totalPages"]!.ToObject<int>());
     }
 
     [Fact]
-    public void TestCountUsersWithEmailParameterNotNull()
+    public async Task TestSearchUsers_Pagination()
     {
-        var count = _userController.CountUsers("email@example.com", "John", "Snow", "123456789");
+        await InitializeDatabase();
 
-        _userDaoMock.Verify(x => x.CountUsers("John", "Snow", "123456789"), Times.Never);
-        count.Should().Be(1);
+        await QueryUtils.CreateUser(_session, Guid.NewGuid(), "user1@Email.com", "user password", "Alice", "Brown", "Address1", "1234321", UserRole.CITIZEN);
+        await QueryUtils.CreateUser(_session, Guid.NewGuid(), "user2@Email.com", "user password", "Bob", "Johnson", "Address2", "1234322", UserRole.CITIZEN);
+        await QueryUtils.CreateUser(_session, Guid.NewGuid(), "user3@Email.com", "user password", "Charlie", "Brown", "Address3", "1234323", UserRole.CITIZEN);
+
+        var client = new RestClient("http://localhost:5062/ilib/v1/usersEndpoint");
+        var request = new RestRequest("");
+        request.AddHeader("Authorization", "Bearer " + adminToken);
+        request.AddHeader("Content-type", "application/json");
+        request.AddQueryParameter("resultsPerPage", "2");
+        request.AddQueryParameter("pageNumber", "2");
+
+        var response = await client.ExecuteGetAsync(request);
+        var content = JObject.Parse(response.Content!);
+
+        Assert.Equal(200, (int)response.StatusCode);
+        Assert.True(content.ContainsKey("items"));
+        var itemsArray = content["items"];
+        Assert.Equal(2, itemsArray!.Count());
+
+        Assert.Equal("user2@Email.com", itemsArray![0]!["email"]!.ToString());
+        Assert.Equal("user3@Email.com", itemsArray![1]!["email"]!.ToString());
+
+        Assert.Equal(2, content["pageNumber"]!.ToObject<int>());
+        Assert.Equal(2, content["resultsPerPage"]!.ToObject<int>());
+        Assert.Equal(5, content["totalResults"]!.ToObject<int>());
+        Assert.Equal(3, content["totalPages"]!.ToObject<int>());
     }
 
-    [Fact]
-    public void TestGetUserInfoExtended_WhenUserDoesNotExist_ThrowsUserDoesNotExistException()
+    public static IEnumerable<object[]> ProvideInvalidUserData()
     {
-        _userDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns((User)null!);
-
-        Action act = () => _userController.GetUserInfoExtended(Guid.NewGuid());
-
-        act.Should().Throw<UserDoesNotExistException>().WithMessage("User does not exist!");
-    }
-
-    [Fact]
-    public void TestGetUserInfoExtended_WhenUserExists_ReturnsUserDTO()
-    {
-        var mockUser = new Mock<User>();
-        var mockArticle = new Mock<Article>();
-        var mockBooking = new Mock<Booking>();
-        var mockLoan = new Mock<Loan>();
-
-        mockUser.Setup(x => x.Id).Returns(Guid.NewGuid());
-        mockUser.Setup(x => x.Name).Returns("Mihail");
-        mockUser.Setup(x => x.Surname).Returns("Teodor");
-        mockUser.Setup(x => x.Email).Returns("email");
-        mockUser.Setup(x => x.Address).Returns("address");
-        mockUser.Setup(x => x.TelephoneNumber).Returns("1234567890");
-
-        mockBooking.Setup(x => x.BookedArticle).Returns(mockArticle.Object);
-        mockBooking.Setup(x => x.BookingUser).Returns(mockUser.Object);
-        mockBooking.Setup(x => x.Id).Returns(Guid.NewGuid());
-
-        mockLoan.Setup(x => x.ArticleOnLoan).Returns(mockArticle.Object);
-        mockLoan.Setup(x => x.LoaningUser).Returns(mockUser.Object);
-        mockLoan.Setup(x => x.Id).Returns(Guid.NewGuid());
-
-        mockArticle.Setup(x => x.Id).Returns(Guid.NewGuid());
-
-        _userDaoMock.Setup(x => x.FindById(It.IsAny<Guid>())).Returns(mockUser.Object);
-        _bookingControllerMock.Setup(x => x.GetBookingsByUser(It.IsAny<Guid>(), 0, 5)).Returns([mockBooking.Object]);
-        _loanControllerMock.Setup(x => x.GetLoansByUser(It.IsAny<Guid>(), 0, 5)).Returns([mockLoan.Object]);
-
-        var result = _userController.GetUserInfoExtended(Guid.NewGuid());
-
-        result.Should().NotBeNull();
-        result.Name.Should().Be(mockUser.Object.Name);
-        result.Surname.Should().Be(mockUser.Object.Surname);
-        result.Email.Should().Be(mockUser.Object.Email);
-        result.Address.Should().Be(mockUser.Object.Address);
-        result.TelephoneNumber.Should().Be(mockUser.Object.TelephoneNumber);
-
-        result.Bookings.Should().HaveCount(1);
-        result.Bookings![0].Id.Should().Be(mockBooking.Object.Id);
-
-        result.Loans.Should().HaveCount(1);
-        result.Loans![0].Id.Should().Be(mockLoan.Object.Id);
+        yield return new object[] { new UserDTO { Email = null, Name = "name", Surname = "surname", TelephoneNumber = "1234567890" }, "Email is required" };
+        yield return new object[] { new UserDTO { Email = "email.com", Name = "name", Surname = "surname", TelephoneNumber = "1234567890" }, "Invalid email format" };
+        yield return new object[] { new UserDTO { Email = "email@test.com", Name = null, Surname = "surname", TelephoneNumber = "1234567890" }, "Name is required" };
+        yield return new object[] { new UserDTO { Email = "email@test.com", Name = "name", Surname = null, TelephoneNumber = "1234567890" }, "Surname is required" };
+        yield return new object[] { new UserDTO { Email = "email@test.com", Name = "name", Surname = "surname", TelephoneNumber = null }, "Telephone number is required" };
+        yield return new object[] { new UserDTO { Email = "email@test.com", Name = "name", Surname = "surname", TelephoneNumber = "12345" }, "The Telephone Number must be 10 characters long" };
     }
 }
