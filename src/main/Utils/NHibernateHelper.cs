@@ -16,8 +16,8 @@ namespace iLib.src.main.Utils
         {
             string dataSource = "localhost";
             string port = "3306";
-            // string database = "iLib_C#";
-            string database = "iLib_C#_test";
+            string database = "iLib_C#";
+            // string database = "iLib_C#_test";
             string userId = "java-client";
             string password = "password";
 
