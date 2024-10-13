@@ -16,8 +16,8 @@ namespace iLib.src.main.Utils
         {
             string dataSource = "localhost";
             string port = "3306";
-            // string database = "iLib_C#";
-            string database = "iLib_C#_test";
+            string database = "iLib_C#";
+            // string database = "iLib_C#_test";
             string userId = "java-client";
             string password = "password";
 
@@ -26,7 +26,7 @@ namespace iLib.src.main.Utils
             return Fluently.Configure()
                 .Database(MySQLConfiguration.Standard.ConnectionString(connectionString))
                 .Mappings(m => m.FluentMappings.AddFromAssembly(Assembly.GetExecutingAssembly()))
-                .ExposeConfiguration(cfg => new SchemaExport(cfg).Create(false, true))
+                .ExposeConfiguration(cfg => new SchemaUpdate(cfg).Execute(false, true))
                 .BuildSessionFactory();
         }
 
