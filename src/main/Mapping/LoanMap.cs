@@ -4,12 +4,10 @@ using NHibernate.Type;
 
 namespace iLib.src.main.Mapping
 {
-    public class LoanMap : ClassMap<Loan>
+    public class LoanMap : SubclassMap<Loan>
     {
         public LoanMap()
         {
-            Id(x => x.Id).GeneratedBy.GuidComb();
-            Map(x => x.Uuid).Unique().Not.Nullable();
             Map(x => x.LoanDate);
             Map(x => x.DueDate);
             Map(x => x.Renewed);
