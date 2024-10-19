@@ -7,11 +7,11 @@ using iLib.src.main.Utils;
 
 namespace iLib.src.main.Services
 {
-    public class UserService(IUserDao userDao, IBookingService bookingController, ILoanService loanController) : IUserService
+    public class UserService(IUserDao userDao, IBookingService bookingService, ILoanService loanService) : IUserService
     {
         private readonly IUserDao _userDao = userDao;
-        private readonly IBookingService _bookingController = bookingController;
-        private readonly ILoanService _loanController = loanController;
+        private readonly IBookingService _bookingService = bookingService;
+        private readonly ILoanService _loanService = loanService;
 
         public Guid AddUser(UserDTO userDTO)
         {
@@ -91,7 +91,7 @@ namespace iLib.src.main.Services
             List<Booking>? bookings;
             try
             {
-                bookings = _bookingController.GetBookingsByUser(user.Id, 0, 5).ToList();
+                bookings = _bookingService.GetBookingsByUser(user.Id, 0, 5).ToList();
             }
             catch (Exception)
             {
@@ -101,15 +101,15 @@ namespace iLib.src.main.Services
             List<Loan>? loans;
             try
             {
-                loans = _loanController.GetLoansByUser(user.Id, 0, 5).ToList();
+                loans = _loanService.GetLoansByUser(user.Id, 0, 5).ToList();
             }
             catch (Exception)
             {
                 loans = null;
             }
 
-            var totalBookings = _bookingController.CountBookingsByUser(user.Id);
-            var totalLoans = _loanController.CountLoansByUser(user.Id);
+            var totalBookings = _bookingService.CountBookingsByUser(user.Id);
+            var totalLoans = _loanService.CountLoansByUser(user.Id);
             return new UserDashboardDTO(user, bookings, loans, totalBookings, totalLoans);
         }
     }

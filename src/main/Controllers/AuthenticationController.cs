@@ -8,10 +8,10 @@ namespace iLib.src.main.Services
 {
     [Route("auth")]
     [ApiController]
-    public class AuthenticationEndpoint(IUserService userService, ILogger<AuthenticationEndpoint> logger) : ControllerBase
+    public class AuthenticationController(IUserService userService, ILogger<AuthenticationController> logger) : ControllerBase
     {
         private readonly IUserService _userService = userService;
-        private readonly ILogger<AuthenticationEndpoint> _logger = logger;
+        private readonly ILogger<AuthenticationController> _logger = logger;
 
         [HttpPost("login")]
         [Consumes("application/json")]
