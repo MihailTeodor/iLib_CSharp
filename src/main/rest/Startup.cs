@@ -80,7 +80,6 @@ namespace iLib.src.main.rest
             app.UsePathBase("/ilib/v1");
             app.UseCors("CorsPolicy");
             app.UseRouting();
-            app.UseMiddleware<JwtMiddleware>();
             app.UseAuthentication();
             app.UseAuthorization();
 
